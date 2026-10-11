@@ -1,7 +1,9 @@
 # 🪟 Aura Glass
 
 [![Release](https://img.shields.io/github/v/release/DevWebeloper/aura-glass?style=flat-square&color=blue)](https://github.com/DevWebeloper/aura-glass/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/DevWebeloper/aura-glass/total?style=flat-square&color=blue)](https://github.com/DevWebeloper/aura-glass/releases)
+[![Total Installs](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/DevWebeloper/aura-glass/main/.github/badges/installs.json&style=flat-square)](https://github.com/DevWebeloper/aura-glass/graphs/traffic)
+[![Unique Cloners](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/DevWebeloper/aura-glass/main/.github/badges/users.json&style=flat-square)](https://github.com/DevWebeloper/aura-glass/graphs/traffic)
+[![Release Downloads](https://img.shields.io/github/downloads/DevWebeloper/aura-glass/total?style=flat-square&color=teal&label=release%20downloads)](https://github.com/DevWebeloper/aura-glass/releases)
 [![Stars](https://img.shields.io/github/stars/DevWebeloper/aura-glass?style=flat-square&color=gold)](https://github.com/DevWebeloper/aura-glass/stargazers)
 [![License](https://img.shields.io/github/license/DevWebeloper/aura-glass?style=flat-square)](LICENSE)
 
