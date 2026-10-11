@@ -53,6 +53,10 @@ git push origin v0.2.6
 gh release create v0.2.6 --title "v0.2.6 — short title" --notes "…"
 ```
 
+Once published, the `.github/workflows/release-assets.yml` workflow automatically
+builds and attaches `aura-glass-vX.Y.Z.tar.gz` and `aura-glass-vX.Y.Z.zip` assets
+to the release for permanent download tracking.
+
 `--no-ff` is deliberate: `main`'s history is a list of feature merges, not a
 flat replay of every commit inside them.
 

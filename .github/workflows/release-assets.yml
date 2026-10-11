@@ -1,0 +1,29 @@
+name: Release Assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  upload-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build release archives
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          DIRNAME="aura-glass-${TAG#v}"
+          git archive --format=tar.gz --prefix="${DIRNAME}/" -o "aura-glass-${TAG}.tar.gz" HEAD
+          git archive --format=zip --prefix="${DIRNAME}/" -o "aura-glass-${TAG}.zip" HEAD
+
+      - name: Upload archives to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          gh release upload "$TAG" "aura-glass-${TAG}.tar.gz" "aura-glass-${TAG}.zip" --clobber

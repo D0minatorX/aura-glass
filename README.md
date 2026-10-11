@@ -1,5 +1,10 @@
 # 🪟 Aura Glass
 
+[![Release](https://img.shields.io/github/v/release/DevWebeloper/aura-glass?style=flat-square&color=blue)](https://github.com/DevWebeloper/aura-glass/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/DevWebeloper/aura-glass/total?style=flat-square&color=blue)](https://github.com/DevWebeloper/aura-glass/releases)
+[![Stars](https://img.shields.io/github/stars/DevWebeloper/aura-glass?style=flat-square&color=gold)](https://github.com/DevWebeloper/aura-glass/stargazers)
+[![License](https://img.shields.io/github/license/DevWebeloper/aura-glass?style=flat-square)](LICENSE)
+
 > **A fluid, frosted-glass desktop for GNOME 48–51.**  
 > Real dynamic background blur, macOS-inspired ergonomics, adaptive accent integration, and unified system theming — installed in seconds without root.
 
