@@ -94,7 +94,7 @@ def main():
     # Write shields.io endpoint JSON files
     installs_payload = {
         "schemaVersion": 1,
-        "label": "total installs",
+        "label": "total downloads",
         "message": f"{total_installs}+",
         "color": "blue",
     }
