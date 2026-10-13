@@ -63,6 +63,9 @@ const DBUS_IFACE = `
       <arg type="u" direction="in" name="opacity"/>
     </method>
     <method name="RefreshOpacity"/>
+    <method name="InspectOverviewState">
+      <arg type="s" direction="out" name="state"/>
+    </method>
     <signal name="FocusChanged">
       <arg type="b" name="fullscreen"/>
       <arg type="s" name="wm_class"/>
@@ -175,13 +178,21 @@ export default class AuraGlassBlurExtension extends Extension {
 
         this._settings = this._openBmsApplicationsSettings();
         if (this._settings) {
-            this._origBuildMenu = WindowMenu.prototype._buildMenu;
-            const self = this;
-            WindowMenu.prototype._buildMenu = function (window) {
-                self._origBuildMenu.call(this, window);
-                self._appendBlurToggle(this, window);
-            };
+            this._hookWindowMenu();
         }
+
+        this._extStateChangedId = Main.extensionManager?.connect?.(
+            'extension-state-changed', (_mgr, ext) => {
+                if (ext.uuid === BMS_UUID) {
+                    if (ext.state === 1) {
+                        if (!this._settings)
+                            this._settings = this._openBmsApplicationsSettings();
+                        if (this._settings)
+                            this._hookWindowMenu();
+                    }
+                    this._updateOpacityFromConfig();
+                }
+            }) ?? 0;
 
         this._dbusImpl = Gio.DBusExportedObject.wrapJSObject(DBUS_IFACE, this);
         this._dbusImpl.export(Gio.DBus.session, DBUS_PATH);
@@ -204,7 +215,39 @@ export default class AuraGlassBlurExtension extends Extension {
         this._initOpacityMonitor();
     }
 
+    _hookWindowMenu() {
+        if (this._origBuildMenu)
+            return;
+        this._origBuildMenu = WindowMenu.prototype._buildMenu;
+        const self = this;
+        WindowMenu.prototype._buildMenu = function (window) {
+            self._origBuildMenu.call(this, window);
+            self._appendBlurToggle(this, window);
+        };
+    }
+
+    _isBmsApplicationsActive() {
+        const bmsEnabled = Boolean(global.blur_my_shell) ||
+            Main.extensionManager?.lookup?.(BMS_UUID)?.state === 1;
+        if (!bmsEnabled)
+            return false;
+        if (!this._settings)
+            this._settings = this._openBmsApplicationsSettings();
+        if (!this._settings)
+            return false;
+        try {
+            return Boolean(this._settings.get_boolean('blur'));
+        } catch (e) {
+            return false;
+        }
+    }
+
     disable() {
+        if (this._extStateChangedId) {
+            Main.extensionManager?.disconnect?.(this._extStateChangedId);
+            this._extStateChangedId = 0;
+        }
+
         if (this._confMonitorId) {
             this._confMonitor.disconnect(this._confMonitorId);
             this._confMonitorId = 0;
@@ -213,7 +256,10 @@ export default class AuraGlassBlurExtension extends Extension {
             this._confMonitor.cancel();
             this._confMonitor = null;
         }
-        this.setWindowOpacityAll(255);
+
+        if (!this._isBmsApplicationsActive()) {
+            this.setWindowOpacityAll(255);
+        }
 
         if (this._origBuildMenu) {
             WindowMenu.prototype._buildMenu = this._origBuildMenu;
@@ -409,7 +455,7 @@ export default class AuraGlassBlurExtension extends Extension {
         if (classes.length === 0)
             return;
 
-        if (!this._settings || !this._settings.get_boolean('blur'))
+        if (!this._isBmsApplicationsActive())
             return;
 
         // The class this toggle writes into the lists: the rootmost entry in
@@ -589,13 +635,17 @@ export default class AuraGlassBlurExtension extends Extension {
         return [Boolean(this._fullscreen)];
     }
 
+    InspectOverviewState() {
+        return Main.overview.visible ? 'visible' : 'hidden';
+    }
+
     // ---- keeping ListWindows fresh -----------------------------------------
 
     _trackWindow(window) {
         if (!window || this._destroyIds.has(window))
             return;
         const actor = window.get_compositor_private?.();
-        if (actor && this._currentActorOpacity !== undefined) {
+        if (actor && this._currentActorOpacity !== undefined && !this._isBmsApplicationsActive()) {
             this._applyWindowActorOpacity(actor, this._currentActorOpacity);
         }
         const id = window.connect('unmanaged', () => {
@@ -652,6 +702,14 @@ export default class AuraGlassBlurExtension extends Extension {
             return;
         }
 
+        if (this._isBmsApplicationsActive()) {
+            // When Blur My Shell's application blur is active, Blur My Shell manages
+            // window actor opacity for whitelisted/blurred apps. Setting all window
+            // actors to 255 would overwrite Blur My Shell's transparency and break blur.
+            this._currentActorOpacity = undefined;
+            return;
+        }
+
         if (mode === 'performance') {
             const opStr = readState('app-opacity');
             let opacity = 252;
@@ -676,6 +734,16 @@ export default class AuraGlassBlurExtension extends Extension {
 
     SetWindowOpacity(opacity) {
         const val = Math.max(0, Math.min(255, opacity));
+        if (this._isBmsApplicationsActive()) {
+            if (this._settings) {
+                try {
+                    this._settings.set_int('opacity', val);
+                } catch (e) {
+                    // ignore if setting failed
+                }
+            }
+            return;
+        }
         this.setWindowOpacityAll(val);
     }
 
@@ -684,6 +752,17 @@ export default class AuraGlassBlurExtension extends Extension {
     }
 
     setWindowOpacityAll(opacity) {
+        if (this._isBmsApplicationsActive()) {
+            if (this._settings) {
+                try {
+                    if (this._settings.get_int('opacity') !== opacity)
+                        this._settings.set_int('opacity', opacity);
+                } catch (e) {
+                    // ignore if setting failed
+                }
+            }
+            return;
+        }
         this._currentActorOpacity = opacity;
         for (const actor of global.get_window_actors()) {
             this._applyWindowActorOpacity(actor, opacity);
