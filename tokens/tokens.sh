@@ -56,10 +56,11 @@ TOKEN_RADIUS_MENU=26
 # it is not guessable from the selector.
 #   css/shell-20-popup-menus.css  .datemenu-popover, .quick-toggle-menu,
 #                                 .popup-menu-content.quick-settings
-#   css/shell-popup-blur.css      .datemenu-popover and .quick-toggle-menu
-#                                 again, at !important — that sheet is spliced
-#                                 last and its .popup-menu-content rule would
-#                                 otherwise repaint both at TOKEN_RADIUS_MENU
+#   css/shell-popup-blur.css      .datemenu-popover, .quick-toggle-menu and
+#                                 .popup-menu-content.quick-settings again, at
+#                                 !important — that sheet is spliced last and
+#                                 its .popup-menu-content rule would otherwise
+#                                 repaint them at TOKEN_RADIUS_MENU
 #   dconf/core.ini                [blur-my-shell/popup] quick-settings-corner-radius
 TOKEN_RADIUS_QUICK_SETTINGS=33
 

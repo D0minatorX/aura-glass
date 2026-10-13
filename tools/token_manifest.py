@@ -75,13 +75,14 @@ MANIFEST = [
      r"^\.datemenu-popover,\n\.quick-toggle-menu \{[^}]*?border-radius: (\d+)px"),
     ("TOKEN_RADIUS_QUICK_SETTINGS", "css", "css/shell-20-popup-menus.css",
      r"^\.popup-menu-content\.quick-settings,[^}]*?border-radius: (\d+)px"),
-    # The popup-blur sheet has to restate the date menu's and quick-toggle
-    # menu's radius as well as the menu one: it is spliced last, and its
-    # .popup-menu-content rule otherwise wins on equal specificity and repaints
-    # both at the menu radius. Same drift the entry above this group describes,
-    # one selector over.
+    # The popup-blur sheet has to restate the date menu's, quick-toggle menu's
+    # and Quick Settings' radius as well as the menu one: it is spliced last,
+    # and its .popup-menu-content rule otherwise wins and repaints them at the
+    # menu radius. Same drift the entry above this group describes, one selector over.
     ("TOKEN_RADIUS_QUICK_SETTINGS", "css", "css/shell-popup-blur.css",
      r"^\.datemenu-popover,\n\.quick-toggle-menu \{[^}]*?border-radius: (\d+)px"),
+    ("TOKEN_RADIUS_QUICK_SETTINGS", "css", "css/shell-popup-blur.css",
+     r"^\.popup-menu-content\.quick-settings,[^}]*?border-radius: (\d+)px"),
     ("TOKEN_RADIUS_QUICK_SETTINGS", "ini", "dconf/core.ini",
      "blur-my-shell/popup", "quick-settings-corner-radius"),
 

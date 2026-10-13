@@ -22,7 +22,7 @@
  * Hairlines, the control ladder and every accent rule carry over from
  * shell-20-popup-menus.css untouched.
  *
- * The menu and date-menu radii do not. This sheet restates it at !important, which the
+ * The menu, date-menu and quick-settings radii do not. This sheet restates them at !important, which the
  * header here denied for a while: the claim that it "deliberately sets no
  * border-radius" was written when that was true and was not revisited when
  * 4790bfc added one alongside `margin: 0 !important`. It is a third place the
@@ -49,14 +49,11 @@
   margin: 0 !important;
 }
 
-/* The date menu and the quick-toggle menu (the Wi-Fi/Bluetooth device list
- * under a toggle's arrow) are each a .popup-menu-content too, so the rule
- * above reaches them — and this sheet is spliced last, so on equal
- * specificity (one class each, both !important) it beats a same-specificity
- * rule in shell-20-popup-menus.css and repaints the surface at the menu
- * radius instead of its own. Quick Settings never loses that fight because
- * .popup-menu-content.quick-settings is two classes; these two have nothing
- * to out-rank with.
+/* The date menu, the quick-toggle menu (the Wi-Fi/Bluetooth device list
+ * under a toggle's arrow) and the Quick Settings panel itself are each a
+ * .popup-menu-content too, so the rule above reaches them — and this sheet is
+ * spliced last, so with !important it repaints the surface at the menu
+ * radius instead of its own unless explicitly restated here.
  *
  * The visible result is both halves of the project rule breaking at once: the
  * blur behind the popup stays rounded at quick-settings-corner-radius while
@@ -72,6 +69,7 @@
 .popup-menu-content.quick-settings,
 .quick-settings {
   background-color: rgba(0, 0, 0, 0.30);
+  border-radius: 33px !important;
 }
 
 .modal-dialog,
