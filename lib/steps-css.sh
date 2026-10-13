@@ -32,9 +32,17 @@ def primary_and_scale():
              "--object-path", "/org/gnome/Mutter/DisplayConfig",
              "--method", "org.gnome.Mutter.DisplayConfig.GetCurrentState"],
             capture_output=True, text=True, timeout=5).stdout
-        m = re.search(r"\(\d+, \d+, ([0-9.]+), uint32 \d+, true, \[\('([^']+)'", out)
-        if m:
-            return m.group(2), float(m.group(1))
+        # Match logical monitors: (x, y, scale, transform, is_primary, [('conn'...)])
+        # Allow negative coordinates (-?\d+), integer/float scales, optional uint32,
+        # and both true/false primary flags so single-monitor Wayland or offset layouts
+        # don't fail to parse and default to 1.0 scale (which causes oversized panel icons).
+        pattern = r"\(-?\d+,\s*-?\d+,\s*(?:@d\s+)?([0-9.]+),\s*(?:uint32\s+|@u\s+)?\d+,\s*(true|false),\s*\[\s*\(\s*'([^']+)'"
+        matches = re.findall(pattern, out)
+        if matches:
+            for scale_s, is_pri, conn_name in matches:
+                if is_pri == "true":
+                    return conn_name, float(scale_s)
+            return matches[0][2], float(matches[0][0])
     except Exception:
         pass
     return None, 1.0
@@ -42,12 +50,24 @@ def primary_and_scale():
 conn, scale = primary_and_scale()
 
 def ppi_of(path):
-    w, h = (int(x) for x in open(path + "modes").read().split()[0].split("x"))
-    edid = open(path + "edid", "rb").read()
-    wcm, hcm = edid[21], edid[22]        # EDID basic params: image size in cm
-    if not (wcm and hcm):
+    try:
+        w, h = (int(x) for x in open(path + "modes").read().split()[0].split("x"))
+        edid = open(path + "edid", "rb").read()
+        wcm, hcm = edid[21], edid[22]        # EDID basic params: image size in cm
+        if not (wcm and hcm) and len(edid) >= 128:
+            for offset in (54, 72, 90, 108):
+                if offset + 18 <= len(edid):
+                    if edid[offset] != 0 or edid[offset + 1] != 0:
+                        h_mm = edid[offset + 12] | ((edid[offset + 14] & 0xF0) << 4)
+                        v_mm = edid[offset + 13] | ((edid[offset + 14] & 0x0F) << 8)
+                        if h_mm > 0 and v_mm > 0:
+                            wcm, hcm = h_mm / 10.0, v_mm / 10.0
+                            break
+        if not (wcm and hcm):
+            return None
+        return math.hypot(w, h) / (math.hypot(wcm, hcm) / 2.54)
+    except Exception:
         return None
-    return math.hypot(w, h) / (math.hypot(wcm, hcm) / 2.54)
 
 best = None
 for path in sorted(glob.glob("/sys/class/drm/card*-*/")):
@@ -60,7 +80,7 @@ for path in sorted(glob.glob("/sys/class/drm/card*-*/")):
             continue
         # Prefer the output mutter calls primary; fall back to the first
         # connected one so this still works with no session bus (dry runs).
-        if conn and name == conn:
+        if conn and (name == conn or name.replace("-A-", "-") == conn.replace("-A-", "-")):
             best = ppi
             break
         if best is None:
@@ -68,7 +88,7 @@ for path in sorted(glob.glob("/sys/class/drm/card*-*/")):
     except Exception:
         continue
 
-if best and scale:
+if best and scale and scale > 0:
     print(round(best / scale))
 PY
 }
