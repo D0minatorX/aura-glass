@@ -1432,6 +1432,11 @@ if [ "$SETTINGS_ONLY" = 1 ]; then
         if [ "$WANT_STYLING" = 1 ]; then
             dequeue_from_disabled_extensions "user-theme@gnome-shell-extensions.gcampax.github.com" || true
             run gnome-extensions enable "user-theme@gnome-shell-extensions.gcampax.github.com" 2>/dev/null || true
+            if [ -d "$EXT_DIR/tiling-assistant@leleat-on-github" ] || [ -d "/usr/share/gnome-shell/extensions/tiling-assistant@leleat-on-github" ]; then
+                dequeue_from_disabled_extensions "tiling-assistant@leleat-on-github" || true
+                run gnome-extensions enable "tiling-assistant@leleat-on-github" 2>/dev/null || true
+                enqueue_extension "tiling-assistant@leleat-on-github" || true
+            fi
         fi
     fi
     remember_glass_mode

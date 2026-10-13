@@ -156,8 +156,8 @@ EXT_CORE=(
 # from whatever the system ships.
 EXT_EXTRA_RECOMMENDED=(
     appindicatorsupport@rgcjonas.gmail.com
-    compiz-alike-magic-lamp-effect@hermes83.github.com
     tiling-assistant@leleat-on-github
+    quick-settings-audio-panel@rayzeq.github.io
     hotedge@jonathan.jdoda.ca
     kiwimenu@kemma
     copyous@boerdereinar.dev
@@ -165,8 +165,8 @@ EXT_EXTRA_RECOMMENDED=(
 
 EXT_EXTRA_ALL=(
     appindicatorsupport@rgcjonas.gmail.com
-    compiz-alike-magic-lamp-effect@hermes83.github.com
     tiling-assistant@leleat-on-github
+    quick-settings-audio-panel@rayzeq.github.io
     hotedge@jonathan.jdoda.ca
     kiwimenu@kemma
     copyous@boerdereinar.dev
@@ -196,8 +196,8 @@ ext_description() {
             printf 'Aura Glass helper — adaptive performance profile menu and per-app blur toggle' ;;
         appindicatorsupport@rgcjonas.gmail.com)
             printf 'AppIndicator Support — System tray icons (Steam, Discord, Slack, etc.)' ;;
-        compiz-alike-magic-lamp-effect@hermes83.github.com)
-            printf 'Magic Lamp Effect — macOS Genie window minimize animation' ;;
+        quick-settings-audio-panel@rayzeq.github.io)
+            printf 'Quick Settings Audio Panel — Per-app volume mixer and audio device switcher in Quick Settings' ;;
         tiling-assistant@leleat-on-github)
             printf 'Tiling Assistant — Window snap assist and 2x2 quarter tiling' ;;
         hotedge@jonathan.jdoda.ca)

@@ -327,6 +327,8 @@ if [ "$REMOVE_EXTENSIONS" = 1 ]; then
              hotedge@jonathan.jdoda.ca restartto@tiagoporsch.github.io \
              xwayland-indicator@swsnr.de appindicatorsupport@rgcjonas.gmail.com \
              compiz-alike-magic-lamp-effect@hermes83.github.com \
+             tiling-assistant@leleat-on-github \
+             quick-settings-audio-panel@rayzeq.github.io \
              add-to-steam@pupper.space; do
         if [ -d "$EXT_DIR/$u" ]; then
             run gnome-extensions disable "$u" 2>/dev/null || true

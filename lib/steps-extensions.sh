@@ -585,8 +585,10 @@ enable_extensions() {
             continue
         fi
         if [ "$is_update" = 1 ] && [ -n "${PRE_INSTALLED_EXTS[$u]:-}" ] && ! is_extension_enabled "$u"; then
-            skip "$u was disabled by the user — keeping disabled"
-            continue
+            if [ "$u" != "tiling-assistant@leleat-on-github" ]; then
+                skip "$u was disabled by the user — keeping disabled"
+                continue
+            fi
         fi
         dequeue_from_disabled_extensions "$u" || true
         if run gnome-extensions enable "$u" 2>/dev/null; then
@@ -766,6 +768,7 @@ PY
 # Automatically disable extensions that have been retired from the theme
 disable_retired_extensions() {
     local retired=(
+        compiz-alike-magic-lamp-effect@hermes83.github.com
         openbar@neuromorph
         just-perfection-desktop@just-perfection
         gnome-ui-tune@itstime.tech
@@ -785,6 +788,10 @@ disable_retired_extensions() {
             run gnome-extensions disable "$u" 2>/dev/null || true
             dequeue_extension "$u" || true
             ok "disabled retired extension: $u"
+        fi
+        if [ -d "$EXT_DIR/$u" ]; then
+            run gnome-extensions uninstall "$u" 2>/dev/null || run rm -rf "$EXT_DIR/$u"
+            ok "removed retired extension: $u"
         fi
     done
 }

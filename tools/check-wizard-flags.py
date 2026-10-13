@@ -56,7 +56,7 @@ _EMPTY = tempfile.TemporaryDirectory()
 wiz.CONF_DIR = _EMPTY.name
 
 RECOMMENDED = ["appindicatorsupport@rgcjonas.gmail.com",
-               "compiz-alike-magic-lamp-effect@hermes83.github.com"]
+               "tiling-assistant@leleat-on-github"]
 
 # A small stand-in catalogue for Answers.best, covering all three tiers so the
 # case below can assert core is excluded and the other two are not.
