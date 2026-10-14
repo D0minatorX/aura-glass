@@ -1039,8 +1039,12 @@ fi
 
 if [ "${WANT_BLUR:-1}" = 0 ]; then
     if [ "${GLASS_MODE:-}" = performance ]; then
-        APP_TRANSPARENCY="${APP_TRANSPARENCY:-0.99}"
-        APP_OPACITY="${APP_OPACITY:-252}"
+        APP_TRANSPARENCY="${APP_TRANSPARENCY:-1.00}"
+        if [ "$APP_TRANSPARENCY" = "1.00" ] || [ "$APP_TRANSPARENCY" = "1" ] || [ "$APP_TRANSPARENCY" = "1.0" ]; then
+            APP_OPACITY=255
+        elif [ -z "$APP_OPACITY" ]; then
+            APP_OPACITY="$(python3 -c "print(round(float('$APP_TRANSPARENCY') * 255))" 2>/dev/null || echo 255)"
+        fi
     else
         APP_TRANSPARENCY=0
         APP_OPACITY=255
@@ -1066,6 +1070,7 @@ fi
 # other for no reason a user could see. It went unnoticed while the only levels
 # anyone passed were the three buckets, whose remembered opacity already matched.
 if [ -z "$APP_OPACITY" ] && [ -z "$APP_OPACITY_EXPLICIT" ] \
+   && [ -z "$APP_TRANSPARENCY" ] \
    && [ -r "$CONF_DIR/app-opacity" ]; then
     APP_OPACITY="$(cat "$CONF_DIR/app-opacity" 2>/dev/null || true)"
 fi

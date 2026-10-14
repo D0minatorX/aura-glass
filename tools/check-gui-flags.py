@@ -83,7 +83,7 @@ def state(**kw):
                     "popup_brightness": 115, "notification_opacity": 40,
                     "popup_blur": True, "notification_blur": True,
                     "scope": "gtk"},
-        "performance": {"transparency": "0.99", "app_tint": "#000000",
+        "performance": {"transparency": "1.00", "app_tint": "#000000",
                         "shell_tint": "#000000", "blur_strength": 100,
                         "popup_brightness": 115, "notification_opacity": 40,
                         "popup_blur": False, "notification_blur": False,
@@ -96,7 +96,7 @@ def state(**kw):
 
 
 FROSTED = state()
-PERFORMANCE = state(glass_mode="performance", blur=False, transparency="0.99",
+PERFORMANCE = state(glass_mode="performance", blur=False, transparency="1.00",
                     scope="none", popup_blur=False, notification_blur=False)
 
 # (description, state on disk, state the widgets are asking for, expected argv)
@@ -141,24 +141,24 @@ CASES = [
      ["--accent", "red", "--radius-preset", "sharp"]),
 
     ("frosted -> performance", FROSTED,
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            scope="none", popup_blur=False, notification_blur=False),
      ["--glass-mode", "performance"]),
 
     ("performance -> frosted",
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            scope="none", popup_blur=False, notification_blur=False,
            modes={"frosted": {"transparency": "0.90"}}),
      state(), ["--glass-mode", "frosted"]),
 
     ("leaving performance with an edit sends the level",
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            popup_blur=False, scope="none", modes={"frosted": {"transparency": "0.60"}}),
      state(transparency="0.75"),
      ["--glass-mode", "frosted", "--app-transparency", "0.75"]),
 
     ("leaving performance with an edit sends the tint",
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            popup_blur=False, scope="none",
            modes={"frosted": {"transparency": "0.90",
                               "app_tint": "#101820"}}),
@@ -166,21 +166,21 @@ CASES = [
      ["--glass-mode", "frosted", "--app-tint-color", "#202020"]),
 
     ("opacity edited inside performance",
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            scope="none", popup_blur=False, notification_blur=False),
      state(glass_mode="performance", blur=False, transparency="0.95",
            scope="none", popup_blur=False, notification_blur=False),
      ["--app-transparency", "0.95"]),
 
     ("frosted -> performance with a radius change", FROSTED,
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            popup_blur=False, scope="none", notification_blur=False, radius="sharp"),
      ["--radius-preset", "sharp", "--glass-mode", "performance"]),
 
     ("shell tint edited inside performance",
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            scope="none", popup_blur=False, notification_blur=False),
-     state(glass_mode="performance", blur=False, transparency="0.99",
+     state(glass_mode="performance", blur=False, transparency="1.00",
            scope="none", popup_blur=False, notification_blur=False,
            shell_tint="#101820"),
      ["--shell-tint-color", "#101820"]),

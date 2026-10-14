@@ -889,28 +889,64 @@ apply_adaptive_blur() {
         return 0
     fi
 
+    local bms_components=(
+        panel/blur
+        overview/blur
+        dash-to-dock/blur
+        lockscreen/blur
+        screenshot/blur
+        window-list/blur
+        appfolder/blur
+    )
+
     case "$action" in
         active)
             step "Applying adaptive performance no-blur state"
             if [ "${DRY_RUN:-0}" = 1 ]; then
-                info "dry-run: apply transient no-blur state across app windows, popups, notifications, and CSS"
+                info "dry-run: apply transient no-blur state across Blur My Shell pipelines, popups, notifications, and CSS"
                 return 0
             fi
+            # Disabling individual blur pipelines in Blur My Shell safely stands down all
+            # blur shaders and background rendering without unloading the extension itself,
+            # which in GNOME Shell 51 causes a fatal Mutter/Clutter actor metadata segfault.
+            mkdir -p "$CONF_DIR/adaptive-performance"
+            local state_file="$CONF_DIR/adaptive-performance/saved-bms-blur"
+            if [ ! -f "$state_file" ]; then
+                : > "$state_file"
+                for comp in "${bms_components[@]}"; do
+                    local val
+                    val="$(dconf read "$base/$comp" 2>/dev/null || true)"
+                    printf '%s=%s\n' "$comp" "${val:-true}" >> "$state_file"
+                done
+            fi
+            for comp in "${bms_components[@]}"; do
+                run dconf write "$base/$comp" false
+            done
             run dconf write "$base/applications/blur" false
-            run dconf write "$base/applications/opacity" 255
+
+            local perf_level="1.00"
+            local perf_opacity=255
+            local perf_app="#000000"
+            local perf_shell="#000000"
+            if [ -d "$CONF_DIR/modes/performance" ]; then
+                perf_level="$(cat "$CONF_DIR/modes/performance/app-transparency" 2>/dev/null || echo 1.00)"
+                perf_app="$(cat "$CONF_DIR/modes/performance/app-tint-color" 2>/dev/null || echo '#000000')"
+                perf_shell="$(cat "$CONF_DIR/modes/performance/shell-tint-color" 2>/dev/null || echo '#000000')"
+            fi
+            if [ "$perf_level" = "1.00" ] || [ "$perf_level" = "1" ] || [ "$perf_level" = "0" ] || [ "$perf_level" = "0.0" ]; then
+                perf_opacity=255
+                run rm -f "$CONF_DIR/gtk4-transparency.css"
+            else
+                perf_opacity="$(python3 -c "print(round(float('$perf_level') * 255))" 2>/dev/null || echo 255)"
+                APP_TRANSPARENCY="$perf_level" APP_TINT_COLOR="$perf_app" install_transparency_css
+            fi
+            run dconf write "$base/applications/opacity" "$perf_opacity"
             run dconf write "$base/popup/blur" false
             run rm -f "$CONF_DIR/shell-popup-blur.css"
             run dconf write "$base/popup/notification" false
             run rm -f "$CONF_DIR/shell-notification-blur.css"
             run install -Dm644 "$REPO_ROOT/css/shell-80-solid.css" "$CONF_DIR/shell-80-solid.css"
-            run rm -f "$CONF_DIR/gtk4-transparency.css"
-            if [ -d "$CONF_DIR/modes/performance" ]; then
-                local perf_shell
-                perf_shell="$(cat "$CONF_DIR/modes/performance/shell-tint-color" 2>/dev/null || true)"
-                if [ -n "$perf_shell" ]; then
-                    SHELL_TINT_COLOR="$perf_shell" apply_shell_tint_color
-                fi
-            fi
+            SHELL_TINT_COLOR="$perf_shell" apply_shell_tint_color
             if [ -x "$apply_cmd" ]; then
                 "$apply_cmd" | sed 's/^/    /'
             fi
@@ -922,40 +958,95 @@ apply_adaptive_blur() {
                 info "dry-run: restore normal blur configuration from saved memos"
                 return 0
             fi
-            apply_app_blur
-            apply_app_opacity
-            apply_popup_blur
-            apply_notification_blur
-            apply_blur_strength
+            local bms_uuid="${BMS_UUID:-blur-my-shell@aunetx}"
+            if [ -d "$EXT_DIR/$bms_uuid" ] || [ -d "/usr/share/gnome-shell/extensions/$bms_uuid" ]; then
+                if ! (gnome-extensions list --enabled 2>/dev/null | grep -qxF "$bms_uuid"); then
+                    dequeue_from_disabled_extensions "$bms_uuid" || true
+                    if ! run gnome-extensions enable "$bms_uuid" 2>/dev/null; then
+                        enqueue_extension "$bms_uuid" || true
+                    fi
+                fi
+            fi
+            local state_file="$CONF_DIR/adaptive-performance/saved-bms-blur"
+            if [ -f "$state_file" ]; then
+                while IFS='=' read -r comp val || [ -n "$comp" ]; do
+                    if [ -n "$comp" ]; then
+                        run dconf write "$base/$comp" "${val:-true}"
+                    fi
+                done < "$state_file"
+                run rm -f "$state_file"
+            else
+                for comp in "${bms_components[@]}"; do
+                    run dconf write "$base/$comp" true
+                done
+            fi
+
+            local mode_dir="$CONF_DIR/modes/$normal_mode"
+            local frost_level="0.90"
+            local frost_app="#000000"
+            local frost_shell="#000000"
+            local frost_scope="gtk"
+            local frost_strength="100"
+            local frost_brightness="115"
+            local frost_ground="40"
+            local frost_popup="1"
+            local frost_notif="1"
+            local frost_opacity=230
+
+            if [ -d "$mode_dir" ]; then
+                frost_level="$(cat "$mode_dir/app-transparency" 2>/dev/null || echo 0.90)"
+                frost_app="$(cat "$mode_dir/app-tint-color" 2>/dev/null || echo '#000000')"
+                frost_shell="$(cat "$mode_dir/shell-tint-color" 2>/dev/null || echo '#000000')"
+                frost_scope="$(cat "$mode_dir/app-blur-scope" 2>/dev/null || echo gtk)"
+                frost_strength="$(cat "$mode_dir/blur-strength" 2>/dev/null || echo 100)"
+                frost_brightness="$(cat "$mode_dir/popup-brightness" 2>/dev/null || echo 115)"
+                frost_ground="$(cat "$mode_dir/notification-opacity" 2>/dev/null || echo 40)"
+                frost_popup="$(cat "$mode_dir/popup-blur" 2>/dev/null || echo 1)"
+                frost_notif="$(cat "$mode_dir/notification-blur" 2>/dev/null || echo 1)"
+            else
+                [ -r "$CONF_DIR/app-transparency" ] && frost_level="$(cat "$CONF_DIR/app-transparency" 2>/dev/null || echo 0.90)"
+                [ -r "$CONF_DIR/app-tint-color" ] && frost_app="$(cat "$CONF_DIR/app-tint-color" 2>/dev/null || echo '#000000')"
+                [ -r "$CONF_DIR/shell-tint-color" ] && frost_shell="$(cat "$CONF_DIR/shell-tint-color" 2>/dev/null || echo '#000000')"
+                [ -r "$CONF_DIR/app-blur-scope" ] && frost_scope="$(cat "$CONF_DIR/app-blur-scope" 2>/dev/null || echo gtk)"
+                [ -r "$CONF_DIR/blur-strength" ] && frost_strength="$(cat "$CONF_DIR/blur-strength" 2>/dev/null || echo 100)"
+                [ -r "$CONF_DIR/popup-brightness" ] && frost_brightness="$(cat "$CONF_DIR/popup-brightness" 2>/dev/null || echo 115)"
+                [ -r "$CONF_DIR/notification-opacity" ] && frost_ground="$(cat "$CONF_DIR/notification-opacity" 2>/dev/null || echo 40)"
+                [ -r "$CONF_DIR/popup-blur" ] && frost_popup="$(cat "$CONF_DIR/popup-blur" 2>/dev/null || echo 1)"
+                [ -r "$CONF_DIR/notification-blur" ] && frost_notif="$(cat "$CONF_DIR/notification-blur" 2>/dev/null || echo 1)"
+            fi
+
+            if [ "$frost_level" = "0" ] || [ "$frost_level" = "0.0" ]; then
+                frost_opacity=255
+            else
+                frost_opacity="$(python3 -c "print(round(float('$frost_level') * 255))" 2>/dev/null || echo 230)"
+            fi
+
+            WANT_BLUR=1 WANT_WINDOW_BLUR=1 APP_BLUR_SCOPE="$frost_scope" APP_BLUR_SCOPE_EXPLICIT=1 apply_app_blur
+            APP_OPACITY="$frost_opacity" APP_OPACITY_EXPLICIT=1 WANT_BLUR=1 WANT_WINDOW_BLUR=1 apply_app_opacity
+            WANT_POPUP_BLUR="$frost_popup" POPUP_BLUR_EXPLICIT=1 apply_popup_blur
+            WANT_NOTIFICATION_BLUR="$frost_notif" NOTIFICATION_BLUR_EXPLICIT=1 apply_notification_blur
+            BLUR_STRENGTH="$frost_strength" BLUR_STRENGTH_EXPLICIT=1 apply_blur_strength
+            POPUP_BRIGHTNESS="$frost_brightness" POPUP_BRIGHTNESS_EXPLICIT=1 apply_popup_brightness
+            NOTIFICATION_OPACITY="$frost_ground" NOTIFICATION_OPACITY_EXPLICIT=1 apply_notification_opacity
 
             run rm -f "$CONF_DIR/shell-80-solid.css"
-            local want_popup="${WANT_POPUP_BLUR:-1}"
-            if [ -r "$CONF_DIR/popup-blur" ]; then want_popup="$(cat "$CONF_DIR/popup-blur" 2>/dev/null || echo 1)"; fi
-            if [ "$want_popup" = 1 ]; then
+            if [ "$frost_popup" = 1 ]; then
                 run install -Dm644 "$REPO_ROOT/css/shell-popup-blur.css" "$CONF_DIR/shell-popup-blur.css"
             else
                 run rm -f "$CONF_DIR/shell-popup-blur.css"
             fi
 
-            local want_notif="${WANT_NOTIFICATION_BLUR:-1}"
-            if [ -r "$CONF_DIR/notification-blur" ]; then want_notif="$(cat "$CONF_DIR/notification-blur" 2>/dev/null || echo 1)"; fi
-            if [ "$want_notif" = 1 ]; then
+            if [ "$frost_notif" = 1 ]; then
                 run install -Dm644 "$REPO_ROOT/css/shell-notification-blur.css" "$CONF_DIR/shell-notification-blur.css"
             else
                 run rm -f "$CONF_DIR/shell-notification-blur.css"
             fi
 
-            local norm_shell=""
-            if [ -r "$CONF_DIR/modes/$normal_mode/shell-tint-color" ]; then
-                norm_shell="$(cat "$CONF_DIR/modes/$normal_mode/shell-tint-color" 2>/dev/null || true)"
-            elif [ -r "$CONF_DIR/shell-tint-color" ]; then
-                norm_shell="$(cat "$CONF_DIR/shell-tint-color" 2>/dev/null || true)"
-            fi
-            if [ -n "$norm_shell" ]; then
-                SHELL_TINT_COLOR="$norm_shell" apply_shell_tint_color
+            if [ -n "$frost_shell" ]; then
+                SHELL_TINT_COLOR="$frost_shell" apply_shell_tint_color
             fi
 
-            install_transparency_css
+            APP_TRANSPARENCY="$frost_level" APP_TINT_COLOR="$frost_app" install_transparency_css
             if [ -x "$apply_cmd" ]; then
                 "$apply_cmd" | sed 's/^/    /'
             fi

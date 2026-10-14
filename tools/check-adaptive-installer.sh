@@ -17,6 +17,11 @@ mkdir -p "$conf/modes/frosted" "$scratch/.config/gtk-4.0" "$scratch/.config/gtk-
 mkdir -p "$scratch/fakebin"
 FAKE_DCONF_LOG="$scratch/fake-dconf.log"
 : > "$FAKE_DCONF_LOG"
+FAKE_EXT_LOG="$scratch/fake-ext.log"
+: > "$FAKE_EXT_LOG"
+FAKE_ENABLED="$scratch/fake-enabled"
+printf 'blur-my-shell@aunetx\n' > "$FAKE_ENABLED"
+mkdir -p "$scratch/.local/share/gnome-shell/extensions/blur-my-shell@aunetx"
 
 cat > "$scratch/fakebin/dconf" <<'STUB'
 #!/usr/bin/env bash
@@ -43,11 +48,31 @@ chmod +x "$scratch/fakebin/gsettings"
 
 cat > "$scratch/fakebin/gnome-extensions" <<'STUB'
 #!/usr/bin/env bash
-exit 0
+case "$1" in
+    list)
+        if [ "${2:-}" = "--enabled" ]; then
+            cat "$FAKE_ENABLED" 2>/dev/null
+        else
+            printf 'blur-my-shell@aunetx\n'
+        fi
+        ;;
+    disable)
+        echo "disable:$2" >> "$FAKE_EXT_LOG"
+        grep -vxF "$2" "$FAKE_ENABLED" > "$FAKE_ENABLED.tmp" 2>/dev/null || : > "$FAKE_ENABLED.tmp"
+        mv "$FAKE_ENABLED.tmp" "$FAKE_ENABLED"
+        ;;
+    enable)
+        echo "enable:$2" >> "$FAKE_EXT_LOG"
+        printf '%s\n' "$2" >> "$FAKE_ENABLED"
+        ;;
+    *)
+        exit 0
+        ;;
+esac
 STUB
 chmod +x "$scratch/fakebin/gnome-extensions"
 
-export PATH="$scratch/fakebin:$PATH" FAKE_DCONF_LOG
+export PATH="$scratch/fakebin:$PATH" FAKE_DCONF_LOG FAKE_EXT_LOG FAKE_ENABLED
 
 # Populate baseline normal configuration and memos
 printf 'frosted\n' > "$conf/glass-mode"
@@ -75,6 +100,10 @@ out="$(bash "$ROOT/install.sh" --settings-only --incremental --adaptive-blur act
     "install.sh --adaptive-blur active failed: $out")
 
 # Check dconf writes
+for comp in panel/blur overview/blur dash-to-dock/blur lockscreen/blur screenshot/blur window-list/blur appfolder/blur; do
+    grep -q "write:/org/gnome/shell/extensions/blur-my-shell/$comp:false" "$FAKE_DCONF_LOG" \
+        || failures+=("active: $comp was not set to false")
+done
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/applications/blur:false" "$FAKE_DCONF_LOG" \
     || failures+=("active: applications/blur was not set to false")
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/applications/opacity:255" "$FAKE_DCONF_LOG" \
@@ -83,6 +112,8 @@ grep -q "write:/org/gnome/shell/extensions/blur-my-shell/popup/blur:false" "$FAK
     || failures+=("active: popup/blur was not set to false")
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/popup/notification:false" "$FAKE_DCONF_LOG" \
     || failures+=("active: popup/notification was not set to false")
+[ ! -s "$FAKE_EXT_LOG" ] \
+    || failures+=("active: gnome-extensions was invoked (dynamic disable causes Mutter 51 crash)")
 
 # Check file states
 [ -f "$conf/shell-80-solid.css" ] \
@@ -101,16 +132,23 @@ after_active_memos="$(memos_snapshot)"
 
 # --- 2. Transition back to restore ---
 : > "$FAKE_DCONF_LOG"
+: > "$FAKE_EXT_LOG"
 out="$(bash "$ROOT/install.sh" --settings-only --incremental --adaptive-blur restore -y 2>&1)" || failures+=(
     "install.sh --adaptive-blur restore failed: $out")
 
 # Check dconf writes
+for comp in panel/blur overview/blur dash-to-dock/blur lockscreen/blur screenshot/blur window-list/blur appfolder/blur; do
+    grep -q "write:/org/gnome/shell/extensions/blur-my-shell/$comp:true" "$FAKE_DCONF_LOG" \
+        || failures+=("restore: $comp was not restored to true")
+done
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/applications/blur:true" "$FAKE_DCONF_LOG" \
     || failures+=("restore: applications/blur was not restored to true")
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/popup/blur:true" "$FAKE_DCONF_LOG" \
     || failures+=("restore: popup/blur was not restored to true")
 grep -q "write:/org/gnome/shell/extensions/blur-my-shell/popup/notification:true" "$FAKE_DCONF_LOG" \
     || failures+=("restore: popup/notification was not restored to true")
+[ ! -s "$FAKE_EXT_LOG" ] \
+    || failures+=("restore: gnome-extensions was invoked (dynamic enable causes Mutter 51 crash)")
 
 # Check file states
 [ ! -f "$conf/shell-80-solid.css" ] \

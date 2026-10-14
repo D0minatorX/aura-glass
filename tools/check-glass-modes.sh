@@ -44,8 +44,8 @@ want "frosted resolves to blur on, window blur on, styling on" \
      "frosted blur=1 window=1 popup=1 transparency=0.90 styling=1" \
      --glass-mode frosted --app-transparency 0.90
 
-want "performance turns blur off, 99% opacity, keeps styling on" \
-     "performance blur=0 window=0 popup=0 transparency=0.99 styling=1" \
+want "performance turns blur off, 100% opacity, keeps styling on" \
+     "performance blur=0 window=0 popup=0 transparency=1.00 styling=1" \
      --glass-mode performance
 
 want "bare --no-blur is opaque but still themed" \
@@ -96,8 +96,8 @@ seeded="$(cat "$scratch/.config/aura-glass/modes/frosted/blur-strength" 2>/dev/n
 
 in_scratch --glass-mode performance >/dev/null 2>&1
 seeded="$(cat "$scratch/.config/aura-glass/modes/performance/app-transparency" 2>/dev/null || true)"
-[ "$seeded" = "0.99" ] || failures+=(
-    "seeding performance should give it 0.99 level, got '$seeded'")
+[ "$seeded" = "1.00" ] || failures+=(
+    "seeding performance should give it 1.00 level, got '$seeded'")
 seeded="$(cat "$scratch/.config/aura-glass/modes/performance/app-blur-scope" 2>/dev/null || true)"
 [ "$seeded" = "none" ] || failures+=(
     "seeding performance should give it 'none' blur scope, got '$seeded'")

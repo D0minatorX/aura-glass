@@ -2124,25 +2124,26 @@ class Settings:
                 self.glass_mode = "frosted"
 
         if self.glass_mode == "performance":
-            self.transparency = read_mode_memo("performance", "app-transparency", "0.99") or "0.99"
+            self.transparency = read_mode_memo("performance", "app-transparency", "1.00") or "1.00"
             self.scope = "none"
             self.popup_blur = False
             self.notification_blur = False
             self.blur = False
-
-        # The colour each half of the desktop darkens toward under its alpha,
-        # and how far every blur reaches. Black and 100 are the shipped answers
-        # and mean "as the theme was written", which is why neither has a
-        # switch beside it — going back to the default is picking it again.
-        self.app_tint = read_hex_memo("app-tint-color")
-        self.shell_tint = read_hex_memo("shell-tint-color")
-        self.blur_strength = read_percent_memo("blur-strength")
-        self.popup_brightness = read_bounded_memo(
-            "popup-brightness", POPUP_BRIGHTNESS_MIN, POPUP_BRIGHTNESS_MAX,
-            POPUP_BRIGHTNESS_DEFAULT)
-        self.notification_opacity = read_bounded_memo(
-            "notification-opacity", NOTIFICATION_OPACITY_MIN,
-            NOTIFICATION_OPACITY_MAX, NOTIFICATION_OPACITY_DEFAULT)
+            self.app_tint = read_mode_memo("performance", "app-tint-color", "#000000") or "#000000"
+            self.shell_tint = read_mode_memo("performance", "shell-tint-color", "#000000") or "#000000"
+            self.blur_strength = 100
+            self.popup_brightness = POPUP_BRIGHTNESS_DEFAULT
+            self.notification_opacity = NOTIFICATION_OPACITY_DEFAULT
+        else:
+            self.app_tint = read_mode_memo(self.glass_mode, "app-tint-color", read_hex_memo("app-tint-color"))
+            self.shell_tint = read_mode_memo(self.glass_mode, "shell-tint-color", read_hex_memo("shell-tint-color"))
+            self.blur_strength = read_percent_memo("blur-strength")
+            self.popup_brightness = read_bounded_memo(
+                "popup-brightness", POPUP_BRIGHTNESS_MIN, POPUP_BRIGHTNESS_MAX,
+                POPUP_BRIGHTNESS_DEFAULT)
+            self.notification_opacity = read_bounded_memo(
+                "notification-opacity", NOTIFICATION_OPACITY_MIN,
+                NOTIFICATION_OPACITY_MAX, NOTIFICATION_OPACITY_DEFAULT)
 
         # Which windows the applications component treats. Blur My Shell reads
         # one or the other depending on enable-all, which is the same choice
@@ -2237,9 +2238,9 @@ class Settings:
         self.modes = {}
         for mode in GLASS_MODES:
             if mode == "performance":
-                level = "0.99"
-                tint_default = disk_app_tint or "#000000"
-                shell_default = disk_shell_tint or "#000000"
+                level = "1.00"
+                tint_default = "#000000"
+                shell_default = "#000000"
             else:
                 level = disk_transparency or "0"
                 tint_default = disk_app_tint or "#000000"
@@ -2439,16 +2440,17 @@ class Settings:
         # tint are — every mode's drawer seeds it to the same 100, and nothing
         # in apply_glass_mode ever moves it — so unlike them it stays a plain
         # comparison against `other`, never the drawer.
-        if self.glass_mode != "performance" and self.blur_strength != other.blur_strength:
-            args += ["--blur-strength", str(self.blur_strength)]
+        if self.glass_mode != "performance":
+            if self.blur_strength != other.blur_strength:
+                args += ["--blur-strength", str(self.blur_strength)]
 
-        # Beside the strength and compared the same way, for the same reason
-        # its comment gives: neither is part of a mode's identity, so both are
-        # a plain comparison against `other` rather than against the drawer.
-        if self.popup_brightness != other.popup_brightness:
-            args += ["--popup-brightness", str(self.popup_brightness)]
-        if self.notification_opacity != other.notification_opacity:
-            args += ["--notification-opacity", str(self.notification_opacity)]
+            # Beside the strength and compared the same way, for the same reason
+            # its comment gives: neither is part of a mode's identity, so both are
+            # a plain comparison against `other` rather than against the drawer.
+            if self.popup_brightness != other.popup_brightness:
+                args += ["--popup-brightness", str(self.popup_brightness)]
+            if self.notification_opacity != other.notification_opacity:
+                args += ["--notification-opacity", str(self.notification_opacity)]
 
         # Whichever list changed, consulted by the mode in force or not.
         #
@@ -4378,7 +4380,7 @@ class Window(Adw.ApplicationWindow):
         page.add(tip_card(
             "<b>Maximum responsiveness with full Aura Glass styling.</b>\n"
             "Blur shaders are disabled and windows, popups and menus have adjustable "
-            "opacity (99% by default) for zero GPU overhead. Theme geometry, corner radii, "
+            "opacity (100% by default) for zero GPU overhead. Theme geometry, corner radii, "
             "accents, and custom tints remain active."))
 
         return self._mode_tab("performance", page)
@@ -6395,9 +6397,9 @@ class Window(Adw.ApplicationWindow):
             tints = self._tints["performance"]
             s.app_tint = tints["app"]
             s.shell_tint = tints["shell"]
-            s.blur_strength = self._applied.blur_strength
-            s.popup_brightness = self._applied.popup_brightness
-            s.notification_opacity = self._applied.notification_opacity
+            s.blur_strength = self._applied.modes.get("performance", {}).get("blur_strength", 100)
+            s.popup_brightness = self._applied.modes.get("performance", {}).get("popup_brightness", 115)
+            s.notification_opacity = self._applied.modes.get("performance", {}).get("notification_opacity", 40)
             s.scope = "none"
             s.transparency = percent_to_level(
                 round(self._p_transparency_scale.get_value()))

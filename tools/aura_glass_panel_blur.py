@@ -50,6 +50,12 @@ def enabled():
             return False
     except FileNotFoundError:
         pass
+    if os.path.exists(os.path.join(directory, "adaptive-performance", "active")):
+        try:
+            if open(os.path.join(directory, "adaptive-performance", "active"), encoding="utf-8").read().strip() == "1":
+                return False
+        except FileNotFoundError:
+            pass
     value = subprocess.run(["dconf", "read", KEY], text=True, capture_output=True,
                            timeout=3).stdout.strip()
     return value == "true"

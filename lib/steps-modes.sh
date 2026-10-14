@@ -32,6 +32,20 @@ resolve_glass_mode() {
         return 0
     fi
 
+    # Explicit flags typed by the user beat the remembered mode. Asking for
+    # window blur or general blur is asking for frosted mode; asking for no-blur
+    # is asking for performance mode.
+    if [ "${WANT_WINDOW_BLUR:-}" = 1 ] && [ -n "${WINDOW_BLUR_EXPLICIT:-}" ]; then
+        GLASS_MODE="frosted"
+        return 0
+    elif [ "${WANT_BLUR:-}" = 1 ] && [ -n "${BLUR_EXPLICIT:-}" ]; then
+        GLASS_MODE="frosted"
+        return 0
+    elif [ "${WANT_BLUR:-}" = 0 ] && [ -n "${BLUR_EXPLICIT:-}" ]; then
+        GLASS_MODE="performance"
+        return 0
+    fi
+
     if [ -r "$CONF_DIR/glass-mode" ]; then
         GLASS_MODE="$(cat "$CONF_DIR/glass-mode" 2>/dev/null || true)"
         case " $VALID_GLASS_MODES " in
@@ -59,10 +73,6 @@ apply_glass_mode() {
             fi
             [ -n "${POPUP_BLUR_EXPLICIT:-}" ]  || WANT_POPUP_BLUR=0
             [ -n "${NOTIFICATION_BLUR_EXPLICIT:-}" ] || WANT_NOTIFICATION_BLUR=0
-            if [ -z "${APP_TRANSPARENCY_EXPLICIT:-}" ]; then
-                APP_TRANSPARENCY=0.99
-                APP_OPACITY=252
-            fi
             WANT_STYLING=1
             ;;
         *)  # No mode to apply: a run driven by bare flags, on a machine that
@@ -140,26 +150,23 @@ seed_glass_mode() {
     disk_ground="$(cat "$CONF_DIR/notification-opacity" 2>/dev/null || true)"
 
     if [ "${GLASS_MODE:-}" = performance ]; then
-        mode_memo_write app-transparency "0.99"
-        mode_memo_write app-tint-color   "${disk_app:-#000000}"
-        mode_memo_write shell-tint-color "${disk_shell:-#000000}"
+        mode_memo_write app-transparency "1.00"
+        mode_memo_write app-tint-color   "#000000"
+        mode_memo_write shell-tint-color "#000000"
         mode_memo_write app-blur-scope   "none"
         mode_memo_write popup-blur       "0"
         mode_memo_write notification-blur "0"
+        mode_memo_write blur-strength    "100"
+        mode_memo_write popup-brightness "115"
+        mode_memo_write notification-opacity "40"
     else
         mode_memo_write app-transparency "${disk_level:-0}"
         mode_memo_write app-tint-color   "${disk_app:-#000000}"
         mode_memo_write shell-tint-color "${disk_shell:-#000000}"
         mode_memo_write app-blur-scope   "${disk_scope:-gtk}"
-    fi
-    mode_memo_write blur-strength    "${disk_strength:-100}"
-    # Both seed to the preset rather than to a neutral 100 and 50: what ships
-    # in dconf/core.ini and css/shell-notification-blur.css is the tuned look,
-    # and a drawer that seeded elsewhere would move the desktop the first time
-    # a mode was opened.
-    mode_memo_write popup-brightness "${disk_brightness:-115}"
-    mode_memo_write notification-opacity "${disk_ground:-40}"
-    if [ "${GLASS_MODE:-}" != performance ]; then
+        mode_memo_write blur-strength    "${disk_strength:-100}"
+        mode_memo_write popup-brightness "${disk_brightness:-115}"
+        mode_memo_write notification-opacity "${disk_ground:-40}"
         mode_memo_write popup-blur       "${disk_popup:-1}"
         mode_memo_write notification-blur "${disk_notification:-1}"
     fi
@@ -174,7 +181,7 @@ load_glass_mode_memos() {
     # passed along: the flag it would become dies in the parser, which is a
     # failure a long way from the file that caused it.
     local def_t=0
-    [ "${GLASS_MODE}" = performance ] && def_t=0.99
+    [ "${GLASS_MODE}" = performance ] && def_t=1.00
     local level; level="$(mode_memo_read app-transparency "$def_t")"
     case "$level" in
         0|0.[0-9][0-9]|1.00) ;;
@@ -183,42 +190,40 @@ load_glass_mode_memos() {
            seed_glass_mode ;;
     esac
 
-    [ -n "${APP_TRANSPARENCY_EXPLICIT:-}" ] || [ -n "${APP_TRANSPARENCY:-}" ] \
-        || APP_TRANSPARENCY="$(mode_memo_read app-transparency "$def_t")"
-    [ -n "${APP_TINT_COLOR:-}" ]   || APP_TINT_COLOR="$(mode_memo_read app-tint-color '#000000')"
-    [ -n "${SHELL_TINT_COLOR:-}" ] || SHELL_TINT_COLOR="$(mode_memo_read shell-tint-color '#000000')"
-    [ -n "${BLUR_STRENGTH:-}" ]    || BLUR_STRENGTH="$(mode_memo_read blur-strength 100)"
-    [ -n "${POPUP_BRIGHTNESS:-}" ] || POPUP_BRIGHTNESS="$(mode_memo_read popup-brightness 115)"
-    [ -n "${NOTIFICATION_OPACITY:-}" ] || NOTIFICATION_OPACITY="$(mode_memo_read notification-opacity 40)"
+    if [ -z "${APP_TRANSPARENCY_EXPLICIT:-}" ]; then
+        APP_TRANSPARENCY="$(mode_memo_read app-transparency "$def_t")"
+        if [ "$GLASS_MODE" = performance ] && [ "$APP_TRANSPARENCY" = 1.00 ]; then
+            APP_OPACITY=255
+        else
+            APP_OPACITY="$(python3 -c "print(round(float('$APP_TRANSPARENCY') * 255))" 2>/dev/null || echo 255)"
+        fi
+        APP_OPACITY_EXPLICIT=1
+    fi
 
-    # *_EXPLICIT has meant "the user typed the flag" up to here; from the
-    # point one of these is set below it means "settled for this run,
-    # whether by a flag or by the mode's drawer, so leave it alone" — because
-    # each of these two markers has a reader further down that goes back to
-    # the shared top-level memo whenever it finds the marker unset:
-    # apply_popup_blur for POPUP_BLUR_EXPLICIT, and both install.sh's own
-    # resolution block a few lines below and apply_app_blur for
-    # APP_BLUR_SCOPE_EXPLICIT — both in lib/steps-dconf.sh. Without setting it
-    # here, a value the drawer just loaded would survive exactly until the
-    # next line that tests the marker, then lose to whatever the top-level
-    # memo (tuned for a different mode) happens to hold.
-    if [ -z "${POPUP_BLUR_EXPLICIT:-}" ]; then
-        local def_pb=1
-        [ "${GLASS_MODE}" = performance ] && def_pb=0
-        WANT_POPUP_BLUR="$(mode_memo_read popup-blur "$def_pb")"
-        POPUP_BLUR_EXPLICIT=1
-    fi
-    if [ -z "${NOTIFICATION_BLUR_EXPLICIT:-}" ]; then
-        local def_nb=1
-        [ "${GLASS_MODE}" = performance ] && def_nb=0
-        WANT_NOTIFICATION_BLUR="$(mode_memo_read notification-blur "$def_nb")"
-        NOTIFICATION_BLUR_EXPLICIT=1
-    fi
-    # Transparent has no scope to remember: not blurring behind windows is what
-    # the mode is, and apply_glass_mode has already pinned it to none.
-    if [ "${GLASS_MODE}" = frosted ] && [ -z "${APP_BLUR_SCOPE_EXPLICIT:-}" ]; then
-        APP_BLUR_SCOPE="$(mode_memo_read app-blur-scope gtk)"
-        APP_BLUR_SCOPE_EXPLICIT=1
+    [ -n "${APP_TINT_COLOR_EXPLICIT:-}" ] || [ -n "${APP_TINT_COLOR:-}" ] \
+        || APP_TINT_COLOR="$(mode_memo_read app-tint-color '#000000')"
+    [ -n "${SHELL_TINT_COLOR_EXPLICIT:-}" ] || [ -n "${SHELL_TINT_COLOR:-}" ] \
+        || SHELL_TINT_COLOR="$(mode_memo_read shell-tint-color '#000000')"
+
+    if [ "${GLASS_MODE}" = frosted ]; then
+        [ -n "${BLUR_STRENGTH_EXPLICIT:-}" ] || [ -n "${BLUR_STRENGTH:-}" ] \
+            || BLUR_STRENGTH="$(mode_memo_read blur-strength 100)"
+        [ -n "${POPUP_BRIGHTNESS_EXPLICIT:-}" ] || [ -n "${POPUP_BRIGHTNESS:-}" ] \
+            || POPUP_BRIGHTNESS="$(mode_memo_read popup-brightness 115)"
+        [ -n "${NOTIFICATION_OPACITY_EXPLICIT:-}" ] || [ -n "${NOTIFICATION_OPACITY:-}" ] \
+            || NOTIFICATION_OPACITY="$(mode_memo_read notification-opacity 40)"
+        if [ -z "${POPUP_BLUR_EXPLICIT:-}" ]; then
+            WANT_POPUP_BLUR="$(mode_memo_read popup-blur 1)"
+            POPUP_BLUR_EXPLICIT=1
+        fi
+        if [ -z "${NOTIFICATION_BLUR_EXPLICIT:-}" ]; then
+            WANT_NOTIFICATION_BLUR="$(mode_memo_read notification-blur 1)"
+            NOTIFICATION_BLUR_EXPLICIT=1
+        fi
+        if [ -z "${APP_BLUR_SCOPE_EXPLICIT:-}" ]; then
+            APP_BLUR_SCOPE="$(mode_memo_read app-blur-scope gtk)"
+            APP_BLUR_SCOPE_EXPLICIT=1
+        fi
     fi
 }
 
@@ -228,11 +233,17 @@ save_glass_mode_memos() {
     mode_memo_write app-transparency "${APP_TRANSPARENCY:-0}"
     mode_memo_write app-tint-color   "${APP_TINT_COLOR:-#000000}"
     mode_memo_write shell-tint-color "${SHELL_TINT_COLOR:-#000000}"
-    mode_memo_write blur-strength    "${BLUR_STRENGTH:-100}"
-    mode_memo_write popup-brightness "${POPUP_BRIGHTNESS:-115}"
-    mode_memo_write notification-opacity "${NOTIFICATION_OPACITY:-40}"
-    mode_memo_write popup-blur       "${WANT_POPUP_BLUR:-1}"
-    mode_memo_write notification-blur "${WANT_NOTIFICATION_BLUR:-1}"
-    [ "${GLASS_MODE:-}" = frosted ] && mode_memo_write app-blur-scope "${APP_BLUR_SCOPE:-gtk}"
+    if [ "${GLASS_MODE:-}" = performance ]; then
+        mode_memo_write app-blur-scope   "none"
+        mode_memo_write popup-blur       "0"
+        mode_memo_write notification-blur "0"
+    else
+        mode_memo_write blur-strength    "${BLUR_STRENGTH:-100}"
+        mode_memo_write popup-brightness "${POPUP_BRIGHTNESS:-115}"
+        mode_memo_write notification-opacity "${NOTIFICATION_OPACITY:-40}"
+        mode_memo_write popup-blur       "${WANT_POPUP_BLUR:-1}"
+        mode_memo_write notification-blur "${WANT_NOTIFICATION_BLUR:-1}"
+        mode_memo_write app-blur-scope   "${APP_BLUR_SCOPE:-gtk}"
+    fi
     return 0
 }

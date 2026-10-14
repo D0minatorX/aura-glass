@@ -168,7 +168,7 @@ export default class AuraGlassBlurExtension extends Extension {
     enable() {
         this._profileLabels = {
             auto: _('Auto'),
-            full: _('Full Glass'),
+            full: _('Frost Glass'),
             performance: _('Performance'),
         };
         this._fullscreen = false;
@@ -185,10 +185,11 @@ export default class AuraGlassBlurExtension extends Extension {
             'extension-state-changed', (_mgr, ext) => {
                 if (ext.uuid === BMS_UUID) {
                     if (ext.state === 1) {
-                        if (!this._settings)
-                            this._settings = this._openBmsApplicationsSettings();
+                        this._settings = this._openBmsApplicationsSettings();
                         if (this._settings)
                             this._hookWindowMenu();
+                    } else {
+                        this._settings = null;
                     }
                     this._updateOpacityFromConfig();
                 }
@@ -371,9 +372,12 @@ export default class AuraGlassBlurExtension extends Extension {
         const active = readState('adaptive-performance', 'active') === '1';
         const reason = readState('adaptive-performance', 'reason') || 'normal';
         const profileLabel = this._profileLabels?.[this._profile] ?? this._profile;
+        let reasonText = reason;
+        if (reason === 'full-glass' || reason === 'normal')
+            reasonText = '';
         const status = statusOverride ?? (active
             ? `${profileLabel} active — ${reason}`
-            : `${profileLabel} — ${reason}`);
+            : (reasonText ? `${profileLabel} — ${reasonText}` : profileLabel));
         this._setPresentation(status);
     }
 
@@ -407,6 +411,7 @@ export default class AuraGlassBlurExtension extends Extension {
                 try {
                     source.wait_check_finish(result);
                     this._refreshProfileState();
+                    this._updateOpacityFromConfig();
                 } catch (error) {
                     this._setPresentation(`${profileLabel} — unavailable`);
                 }
@@ -685,7 +690,8 @@ export default class AuraGlassBlurExtension extends Extension {
                     eventType === Gio.FileMonitorEvent.CREATED ||
                     eventType === Gio.FileMonitorEvent.CHANGED) {
                     const name = file?.get_basename();
-                    if (name === 'app-opacity' || name === 'app-transparency' || name === 'glass-mode') {
+                    if (name === 'app-opacity' || name === 'app-transparency' || name === 'glass-mode' ||
+                        name === 'adaptive-performance' || name === 'active') {
                         this._updateOpacityFromConfig();
                     }
                 }
@@ -698,6 +704,12 @@ export default class AuraGlassBlurExtension extends Extension {
     _updateOpacityFromConfig() {
         const mode = readState('glass-mode') || 'frosted';
         if (mode === 'solid') {
+            this.setWindowOpacityAll(255);
+            return;
+        }
+
+        const adaptiveActive = readState('adaptive-performance', 'active') === '1';
+        if (adaptiveActive) {
             this.setWindowOpacityAll(255);
             return;
         }
