@@ -596,6 +596,6 @@ install_css() {
     if [ "${DRY_RUN:-0}" = 1 ]; then
         info "dry-run: aura-glass-apply"
     else
-        "$HOME/.local/bin/aura-glass-apply" | sed 's/^/    /'
+        "$HOME/.local/bin/aura-glass-apply" --reload-gtk | sed 's/^/    /'
     fi
 }

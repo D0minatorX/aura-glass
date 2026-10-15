@@ -35,6 +35,8 @@ When you fix one, move it to the bottom section with the commit that fixed it.
 | [KI-17](#ki-17) | Info | | Housekeeping: stray tags, `.claude/` not ignored, `--plan-json` unwired, `refresh` via PATH |
 | [KI-18](#ki-18) | High | **Fixed** (uncommitted) | A fresh `--glass-mode frosted` (and the text wizard's Customize path) gives opaque windows. The wizard's transparency answer is discarded |
 | [KI-19](#ki-19) | Low | **Fixed** (uncommitted) | "Blur This App" writes to the destroyed window menu (journal stack traces), and its post-toggle checkmark uses a different rule than the menu |
+| [KI-20](#ki-20) | Medium | **Fixed** (uncommitted) | A mode switch left open GTK windows on the old alpha until each app was reopened |
+| [KI-21](#ki-21) | Medium | **Fixed** (uncommitted) | Tray Performance profile never showed the opaque shell sheet (shell theme not reloaded) |
 
 ---
 
@@ -441,3 +443,42 @@ Fixed in the working tree on 2026-10-15, not yet committed. The entries above ar
 - **KI-18** — `seed_glass_mode` seeds frosted at 0.90 (0.95 without window blur); the text wizard marks its transparency answer explicit. Verified with the fixture reproductions and the hermetic suite; needs a live check.
 - **KI-19** — `_toggleBlur` guards the menu item with its `destroy` signal and re-checks it with the menu's own whitelist/blacklist rule over the class chain. Syntax-checked only; needs a live check after the helper reloads.
 - **Gray sheet over the wallpaper with Desktop Icons NG** ([#13](https://github.com/DevWebeloper/aura-glass/issues/13)) — DING's desktop window is a plain GTK4 `window.desktopwindow` that depends on its own 0.005-alpha background. The theme's and `gtk4-transparency.css`'s `window` / `window.background` ground matched it at equal specificity and painted it solid; the Overview hid it and a corner-rounding reapply brought it back. `css/gtk4-70-surfaces.css` now gives `window.desktopwindow` (two classes) its alpha back. Code-read against DING's source; **not reproduced** (DING is not installed on the dev machine) and needs a live check from the reporter. GTK3 DING builds are not covered.
+
+---
+
+## KI-20
+
+**Mode switch leaves open GTK windows on the old opacity.**
+
+**Symptom.** Frosted to Performance rewrote `gtk.css` (windows 1.00, popups and
+banners opaque) but already-running GTK apps kept Frosted's translucent fill,
+so with no blur behind them the wallpaper showed through until they were closed
+and reopened.
+
+**Root cause.** GTK reads user CSS at startup; `aura-glass-apply` only printed
+"restart GTK apps".
+
+**Fix.** `aura-glass-apply --reload-gtk` toggles `gtk-theme` (Adwaita and back)
+when a GTK target changed and the theme in force is ours, which makes running
+GTK3/GTK4 apps re-read their CSS live. The installer's CSS step and both
+adaptive transitions pass it. A bare `aura-glass-apply` stays quiet, as
+`tools/check-apply-publication.py` requires.
+
+---
+
+## KI-21
+
+**Tray Performance profile leaves the shell on Frosted's sheet.**
+
+**Symptom.** Choosing Performance from the top-bar profile menu turned blur off
+but panel, menus and Quick Settings stayed translucent; the app's Performance
+mode looked right.
+
+**Root cause.** The adaptive `active` and `restore` transitions installed
+`shell-80-solid.css` (or removed it) and re-spliced with `aura-glass-apply
+--no-shell-reload`, so the running shell never loaded the change.
+
+**Fix.** `apply_adaptive_blur` calls `aura-glass-apply --reload-gtk`; the shell
+theme reloads when the shell CSS changed. Verified live: tray Performance and
+Full both show the right sheet. The original flag was added against
+actor-destruction and blur-recompile thrash; none seen.

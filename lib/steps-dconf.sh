@@ -1059,11 +1059,12 @@ apply_adaptive_blur() {
             run rm -f "$CONF_DIR/shell-notification-blur.css"
             run install -Dm644 "$REPO_ROOT/css/shell-80-solid.css" "$CONF_DIR/shell-80-solid.css"
             SHELL_TINT_COLOR="$perf_shell" apply_shell_tint_color
-            # Adaptive transitions are transient: update generated CSS on disk but
-            # skip reloading the GNOME Shell theme to prevent actor destruction, layout
-            # allocation errors, and multi-monitor 4K blur recompilation thrash.
+            # Re-splice and reload the shell theme: the tray's Performance item is only
+            # visible once the shell loads shell-80-solid.css, and a reload with every
+            # blur pipeline already off (or restored just above) has no blur actors to
+            # destroy. --no-shell-reload left the shell on Frosted's sheet.
             if [ -x "$apply_cmd" ]; then
-                "$apply_cmd" --no-shell-reload | sed 's/^/    /'
+                "$apply_cmd" --reload-gtk | sed 's/^/    /'
             fi
             ok "adaptive no-blur state active (transient)"
             ;;
@@ -1165,11 +1166,12 @@ apply_adaptive_blur() {
             fi
 
             APP_TRANSPARENCY="$frost_level" APP_TINT_COLOR="$frost_app" install_transparency_css
-            # Adaptive transitions are transient: update generated CSS on disk but
-            # skip reloading the GNOME Shell theme to prevent actor destruction, layout
-            # allocation errors, and multi-monitor 4K blur recompilation thrash.
+            # Re-splice and reload the shell theme: the tray's Performance item is only
+            # visible once the shell loads shell-80-solid.css, and a reload with every
+            # blur pipeline already off (or restored just above) has no blur actors to
+            # destroy. --no-shell-reload left the shell on Frosted's sheet.
             if [ -x "$apply_cmd" ]; then
-                "$apply_cmd" --no-shell-reload | sed 's/^/    /'
+                "$apply_cmd" --reload-gtk | sed 's/^/    /'
             fi
             ok "normal blur configuration restored"
             ;;

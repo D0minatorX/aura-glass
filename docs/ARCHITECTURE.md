@@ -161,7 +161,8 @@ top-bar menu (Aura Glass Helper)          aura-glass-adaptive.service (user)
   `adaptive-performance/saved-bms-blur`. Turns every pipeline off *without*
   disabling the extension, because disabling BMS on GNOME 51 segfaults Mutter.
   Swaps in the opaque `shell-80-solid` ladder and the performance drawer's tints
-  and level, then re-splices with `aura-glass-apply --no-shell-reload`.
+  and level, then re-splices with `aura-glass-apply --reload-gtk`, which also reloads the
+  shell theme so the sheet takes effect.
 - **restore.** Writes the saved keys back and re-applies the **normal mode's
   drawer** (blur scope, strength, brightness, tints, notification ground,
   popup/notification sheets).
