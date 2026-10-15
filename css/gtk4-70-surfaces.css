@@ -224,6 +224,30 @@ window.fullscreen {
   padding: 0;
 }
 
+/* ---------- The desktop-icons window ----------
+ * Desktop Icons NG (ding@rastersoft.com) draws the desktop as one undecorated
+ * GTK4 window per monitor, carrying the class `desktopwindow`, and relies on
+ * its own `window.desktopwindow { background-color: rgba(0,0,0,0.005) }` to
+ * stay see-through over the wallpaper. Every rule above and in
+ * gtk4-transparency.css paints `window` / `window.background`, which that
+ * window matches at the same specificity, so it came up as a solid tinted
+ * sheet covering the wallpaper. The Overview hides the window, which is why
+ * the wallpaper came back there (issue #13), and a corner-rounding change
+ * reloaded gtk.css and brought it back.
+ *
+ * Two classes beat the one-class rules above whatever the load order. The
+ * alpha is 0.005 rather than 0 on purpose: DING's own comment notes that GTK4
+ * ignores a fully empty, fully transparent window.
+ */
+window.desktopwindow,
+window.desktopwindow.background {
+  background-color: rgba(0, 0, 0, 0.005);
+  background-image: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
 /* ---------- Video players and media viewports ----------
  * Video players (Showtime, Totem, Clapper, Celluloid, etc.) embed media in
  * GtkPicture, GtkVideo, or GtkGraphicsOffload widgets. Upstream Tahoe-Dark added
