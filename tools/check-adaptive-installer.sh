@@ -76,7 +76,6 @@ export PATH="$scratch/fakebin:$PATH" FAKE_DCONF_LOG FAKE_EXT_LOG FAKE_ENABLED
 
 # Populate baseline normal configuration and memos
 printf 'frosted\n' > "$conf/glass-mode"
-printf '1\n' > "$conf/modes/frosted/blur"
 printf 'yes\n' > "$conf/bms-window-blur"
 printf 'yes\n' > "$conf/bms-popup-blur"
 printf 'yes\n' > "$conf/bms-notification-blur"
@@ -90,7 +89,7 @@ printf '/* transparency */\n' > "$conf/gtk4-transparency.css"
 
 # Snapshot initial memos
 memos_snapshot() {
-    (cd "$conf" && sha256sum glass-mode modes/frosted/blur bms-window-blur bms-popup-blur bms-notification-blur transparency accent 2>/dev/null | sort)
+    (cd "$conf" && sha256sum glass-mode bms-window-blur bms-popup-blur bms-notification-blur transparency accent 2>/dev/null | sort)
 }
 before_memos="$(memos_snapshot)"
 
@@ -166,7 +165,9 @@ after_restore_memos="$(memos_snapshot)"
     || failures+=("restore: configuration memos were modified during restore transition")
 
 # --- 3. Baseline already no-blur skips redundant writes ---
-printf '0\n' > "$conf/modes/frosted/blur"
+# Performance is the no-blur mode; the guard reads the mode itself, the same
+# glass-mode memo a real performance install leaves behind.
+printf 'performance\n' > "$conf/glass-mode"
 : > "$FAKE_DCONF_LOG"
 out="$(bash "$ROOT/install.sh" --settings-only --incremental --adaptive-blur active -y 2>&1)" || failures+=(
     "baseline no-blur test failed: $out")

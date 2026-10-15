@@ -1,213 +1,192 @@
 # The GUI layer
 
-Two GTK4 / libadwaita windows, both optional, both pure front ends for flags
-`install.sh` already has. Neither writes a theme file.
+Two GTK4 + libadwaita windows. Both are optional and both are **front ends for
+flags `install.sh` already has**. Neither writes a theme file. If the toolkit is
+missing, the installer skips them and everything else installs normally.
+Nothing is reachable only from the GUI.
 
-If PyGObject or libadwaita is missing, the installer says so, skips the windows
-and installs everything else normally. Nothing in the GUI is reachable only from
-the GUI.
-
----
-
-## `gui/aura_glass_setup_wizard.py` — the opening questions
-
-Run by `install.sh` **before anything is installed**, via
-`lib/steps-wizard.sh`.
-
-### The contract
-
-```
-stdout   the flags install.sh should run with, one token per line.
-         Nothing else may EVER be printed there.
-stderr   anything worth saying to a human.
-exit 0   answered.
-exit 2   cancelled — install.sh stops, having changed nothing.
-other    something broke; install.sh asks the same questions in the terminal,
-         so a traceback costs a nicer wizard rather than the install.
-```
-
-`install.sh` **blocks** on it. The exit code and stdout are the entire point —
-do not make it asynchronous.
-
-### Parity
-
-Every question here has a twin in `install.sh`'s terminal wizard (search for
-`Step 1: Choose Accent Color`), which is what runs over SSH, on a machine
-without PyGObject, or for someone who would rather not install one. **Adding a
-question to one and not the other is a setting half your users on half their
-machines are never offered.** Parity is a stated rule, not something code
-enforces.
-
-### Constraints
-
-- It runs before there is an install: it is handed `--repo` by the script that
-  launched it, rather than reconstructing a checkout path from a memo the way
-  the settings window does.
-- It imports PyGObject and nothing else — not even pycairo. What
-  `lib/distro.sh` probes for is what this window is allowed to need.
-
-Checked by `tools/check-wizard-flags.py`, which composes every command line the
-wizard can produce and asserts `install.sh` accepts each one — including the
-`--extensions` list its per-extension switches send.
+Requirements: PyGObject, Gtk 4, libadwaita 1. The settings window also needs
+**pycairo** (`import cairo`), which the installer's probe doesn't check yet
+(KI-04).
 
 ---
 
-## `gui/aura_glass_settings.py` — retuning afterwards
+## 1. `gui/aura_glass_setup_wizard.py`: the opening questions
 
-Launched from the Activities overview or `aura-glass-settings`. Refuses to open
-without `$CONF_DIR`, and finds the checkout through `$CONF_DIR/repo-path` —
-recorded rather than guessed, because by the time anyone opens the window the
-shell it was installed from is long gone, and a wrong guess would mean Apply
-silently reconfiguring from some other copy of the project.
+Runs **before** anything is installed, from `run_setup_wizard`
+(`lib/steps-wizard.sh`), when `install.sh` gets no flags (or `--interactive`)
+in a TTY with a display.
 
-### How Apply works
+### Contract
 
 ```
-install.sh --settings-only --yes <only the flags that changed>
+argv     --repo <checkout> [--gdm-present]
+stdout   the flags, one token per line. NOTHING else may ever be printed here.
+stderr   anything for a human.
+exit 0   answered          → install.sh parses the flags (parse_flags again) and continues with --yes
+exit 2   cancelled         → install.sh stops, nothing changed
+other    broke             → install.sh asks the same questions in the terminal
 ```
 
-`Settings.__init__` reads the current answers out of `$CONF_DIR`;
-`Settings.flags_against(other)` produces the arguments that turn one state into
-another. **Only differences are sent**, because `install.sh` resolves an absent
-flag from the memo it wrote last time. Sending the full set every time would
-work, but would make every Apply an assertion about settings the user never
-touched — which is how a GUI ends up undoing a CLI choice it never showed.
-
-`--settings-only` is what makes this safe to drive from a window: it reapplies
-the dconf preset, the CSS and the gsettings, and skips the theme, the extensions
-and everything wanting root. No password, no terminal to answer a prompt in, and
-no network — unless an icon pack, pointer pack or font row was changed, since
-asking for a different one is asking for it to be installed. Those three rows
-say so.
+`install.sh` **blocks** on it. Plain redirection, no pipe: the exit code is the
+protocol.
 
 ### Pages
 
-`NAV_SECTIONS` is the list, and **its order is not only presentation**: the
-builders run in it, so a page whose widgets another builder reads must come
-first (Glass before Per-app blur — the per-app list asks the blur rows which
-list is active).
+`welcome` (Complete Experience / Customize) → `accent` → `blur` ("Frosted
+glass, or performance". "Performance" sends `--no-blur`) → `blur_details` (popup blur, scope,
+transparency) → `icons` → `cursors` (+ size)
+→ `extensions` → `gdm` (only with `--gdm-present`) → `summary`.
 
-| Page | Group | What it holds |
-|---|---|---|
-| Glass | Appearance | The three modes as three tabs; each tab shows only its own mode's tuning, read from that mode's drawer |
-| Appearance | Appearance | Accent, icon and pointer packs, titlebar buttons and their style, interface font |
-| Corner rounding | Appearance | Seven presets drawn as little windows wearing their own corners, a reset, or eight per-surface spin rows with a live drawing |
-| Per-app blur | Appearance | A switch per installed app, an **Open now** list of live windows, a default for everything unchosen, a **Fullscreen performance games** list to trigger Performance mode when gaming, and a Patterns tab for wildcards |
-| Extensions | System | Every catalogued extension with a switch and install/remove, plus the recommended and full packs |
-| Packages | System | What each pack on disk costs, and removal |
-| System | System | Dependencies, rounded-blur, panel blur fix, login screen, monitor sync |
-| Updates | System | Version, check, install |
-| Uninstall | *(none)* | The same three scopes `uninstall.sh` has |
+`Answers.to_argv` emits a **full** flag list rather than a diff, because there's
+nothing on disk yet to clobber. `--no-blur` goes out alone. Otherwise it sends
+the scope flag, then `--app-transparency`, then `--popup-blur` or
+`--no-popup-blur`. `Answers.best()` is "Complete Experience": every catalogued
+extension, GDM where present, and monitor sync only on multi-monitor machines.
 
-Uninstall is built into the stack — `_reload` and `_mark_dirty` need every
-widget to exist — but carries no sidebar row: a destructive page has no business
-sitting in the same list as the rest. The primary menu opens it.
+### Parity with the text wizard
 
-`SEARCH_INDEX` gives each page extra words it answers to, hand-kept rather than
-walked off the built widgets, because several pages are not
-`Adw.PreferencesPage` at all.
-
-### What does not ride on Apply
-
-**Extension switches.** Instant, reversible and unprivileged, but not settings
-`install.sh` resolves — so they apply as they are clicked, through
-`bin/aura-glass-ext`, streamed into the same in-window log Apply uses. The page
-is built from `aura-glass-ext list` rather than a second Python copy of the
-arrays; `tools/check-ext-catalogue.sh` keeps that command complete.
-
-**The Packages page.** Removing a pack under `$HOME` is a filesystem delete with
-no flag or memo behind it. A pack under `/usr` belongs to a package: the window
-names the owning package and hands the removal command to a terminal, because
-deleting a package's files out from under it leaves its database describing
-files that are gone.
-
-**Anything needing root** — the dependency install, `gnome-rounded-blur`, the
-login screen, the monitor sync, the uninstall scopes. These **open a real
-terminal**. `sudo` down a pipe that nothing can type into blocks forever; the
-answer is not to run it in-window but to open a terminal with a keyboard
-attached, and to say so rather than starting something that would silently
-decline. If none of the terminals it knows is installed, it hands over the
-command. Those rows report the last state the window read, not a live one — a
-spawned terminal is deliberately not waited on.
-
-`tools/check-terminal-spawn.py` asserts each terminal gets a runnable argv.
-Whether one actually stays open is a thing only a desktop can answer.
-
-### Live preview
-
-`bin/aura-glass-preview` backs the sliders:
-
-```
-aura-glass-preview begin
-aura-glass-preview set [--app-tint HEX] [--shell-tint HEX] [--transparency L]
-                       [--radius-preset NAME] [--radius-custom W,M,Q,N,D,P,O]
-                       [--blur-strength PCT] [--popup-blur 0|1]
-                       [--popup-brightness PCT] [--notification-opacity PCT]
-                       [--window-blur 0|1] [--scope gtk|all]
-                       [--app-blur-allow LIST] [--app-blur-block LIST]
-aura-glass-preview apps --allow LIST --block LIST [--window-blur 0|1] [--scope …]
-aura-glass-preview revert
-aura-glass-preview status
-```
-
-`begin` snapshots the installed sheets, the Blur My Shell dconf subtree and the
-memos the functions below would overwrite. `set` then calls the **same**
-`apply_*` functions `install.sh --settings-only` uses, against a CSS baseline
-reset from `css/` on every call — the same reset `install_css` does, which is
-what keeps a relative rewrite (transparency, shell tint) from compounding while
-a slider is dragged.
-
-`apps` is `set`'s per-app-only sibling: four dconf writes through
-`apply_app_blur` and nothing else. Flipping a switch is not a reason to rebuild
-the whole CSS pipeline.
-
-**The one hard rule:** a preview must never leave a `$CONF_DIR` memo different
-from what it was before `begin`. `Settings()` and the next real install must see
-what was last actually applied, never a preview that happened to be showing.
-`PREVIEW_MODE=1` makes `remembering()` false, so nothing is written and there is
-nothing to restore and nothing to race. `tools/check-preview.sh` asserts it.
-
-### The D-Bus bridge
-
-"Open now" needs to know what windows exist, and an unprivileged GTK app on
-Wayland has no way to ask. `extensions/aura-glass-blur@aura-glass.local` exports
-`io.github.DevWebeloper.AuraGlass` with `ListWindows` and a `WindowsChanged`
-signal; `ShellBridge` in the window is the client. The service is exported
-whenever the extension is enabled, independent of whether Blur My Shell is
-present — the window decides whether to use it by whether the bridge answers at
-all.
-
-### Accent, and why there is no colour picker
-
-The accent row offers nine names and a button through to
-`Settings → Appearance`, because the accent is **not this project's setting to
-own**: the shell CSS reads `-st-accent-color` and the GTK CSS reads
-`@accent_bg_color`, so GNOME already recolours the desktop live. The row exists
-to keep the remembered value in step.
-
-A custom hex is not on offer, and that looks like an omission. `-st-accent-color`
-is not a property St will let anything assign: it is a read-only keyword backed
-by the C enum `StSystemAccentColor`, resolved from the gsetting. GTK4's
-`@accent_bg_color` *is* an ordinary named colour and would override cleanly —
-which is the trap. A custom hex is reachable for every app window and for none
-of the shell. That is not a colour scheme, it is two of them.
+Every question has a twin in `install.sh`'s text wizard (search for
+`Step 0: Quick Start`). The rule is that options, defaults and recommendations
+match. It's **stated in comments, not enforced**, and it has drifted on the
+recommended pointer (KI-05). `check-wizard-flags.py` checks only that every
+command line the window can produce is accepted.
 
 ---
 
-## Rules for changing either window
+## 2. `gui/aura_glass_settings.py`: retuning afterwards
 
-- **Standard library plus PyGObject.** The wizard additionally may not import
-  anything `lib/distro.sh` does not probe for.
-- **Never write a theme file.** Compose a command line and run the installer.
-- **Never reimplement precedence.** If a value must be known before
-  `install.sh` runs, duplicate it *and* add a checker — that is what
-  `tools/check-gui-radius.py` is.
-- **Send only what changed.**
-- Run all four GUI checks before committing:
+Launched from the app grid (`io.github.DevWebeloper.AuraGlassSettings`) or
+`aura-glass-settings`. It refuses to start without `$CONF_DIR`. It finds the
+checkout through `$CONF_DIR/repo-path`, which is recorded rather than guessed.
+If that path is gone, Apply and the repair actions do nothing except show a
+"checkout is gone" toast. It's a
+`HANDLES_COMMAND_LINE` app, so `--page IDENT` raises a running instance on a
+page.
 
-```bash
-python3 tools/check-gui-flags.py
-python3 tools/check-wizard-flags.py
-python3 tools/check-gui-radius.py
-python3 tools/check-terminal-spawn.py
+### State: `Settings`
+
+`Settings.__init__` reads what is **installed**, not what the window last sent:
+
+- the top-level memos (accent, radius, scope, popup and notification blur, packs, font, buttons, style, panel fix, update check),
+- the mode: `glass-mode`, else derived from whether `shell-80-solid.css` is installed,
+- per mode, `self.modes[mode]` read from the drawers, so switching tabs shows a mode's own tuning without applying anything.
+
+For the mode in force:
+
+- **frosted**: transparency comes from the top-level memo, tints from the drawer.
+- **performance**: transparency and tints come from the drawer.
+
+> Because the installer's narrow `--incremental` path doesn't update drawers,
+> the window can re-read stale tints or levels right after Apply (KI-01).
+> **Rule C5:** read a field from wherever the installer will resolve it next
+> time, and make sure every writer keeps that place current.
+
+Missing-memo defaults must equal the installer's. Today `cursor-pack` defaults
+to `moga` here but `adwaita` in the installer (KI-05).
+
+### Apply: `flags_against`
+
 ```
+_on_apply → PreviewQueue.request_terminal("apply")
+         → _start_apply: install.sh --settings-only --incremental --yes <diff>
+                         (wrapped in: aura-glass-preview commit --session S -- … when a preview is active)
+         → on success: _reload() (Settings() again), toast; on failure the preview is reverted
+```
+
+`Settings.flags_against(other)` sends **only differences**, because the
+installer resolves an absent flag from its memo. Sending everything would make
+every Apply assert settings the user never touched. Details that matter:
+
+- A mode change sends `--glass-mode` first. The baseline for the other fields is then the **target mode's drawer**, not the old state.
+- `--radius-custom` stands in for `--radius-preset custom`.
+- The scope flag goes before `--app-transparency`, because `--no-window-blur` sets 0.95 unless a level is given.
+- The app tint is sent only while transparency is on (its sheet doesn't exist otherwise).
+- Blur strength and brightnesses are compared against `other`, not the drawer, and aren't sent in Performance.
+- Both app-blur lists are sent whenever either changed.
+
+Which Applies stay narrow (`accent`, `cursor-*`, `window-buttons`,
+`window-brightness`, `app-blur`, `css`) and which fall back to the full retune
+is decided by `select_apply_actions`. See
+[CONFIG-REFERENCE.md](CONFIG-REFERENCE.md) §1.4.
+
+### Pages (`NAV_SECTIONS`; builders run in this order)
+
+| Page | Group | Holds |
+|---|---|---|
+| Glass | Appearance | Two mode tabs (Frosted, Performance) in an `Adw.ViewStack`, with a banner when the tab differs from the installed mode. **Frosted**: tints, transparency (an off switch plus a 70–100 % scale), blur strength, window and popup blur brightness, notification ground, popup and notification blur switches, and the scope as two switches ("Blur behind app windows", then "all application windows", which defaults on). **Performance**: tints and one opacity scale. |
+| Appearance | Appearance | Accent (nine names plus a link to GNOME Settings; there's no hex picker, by design), icon pack and colour, pointer and size, font, titlebar buttons and style |
+| Corner rounding | Appearance | Seven preset cards drawn with their own corners, reset, or eight per-surface spin rows with a live drawing |
+| Per-app blur | Appearance | A switch per installed app, live "Open now" windows (D-Bus), a default for unchosen apps, **fullscreen performance games** (written straight to `adaptive-fullscreen-apps`), wildcard patterns |
+| Extensions | System | Every catalogued extension: switch, install/remove, recommended and full packs, via `bin/aura-glass-ext` |
+| Packages | System | Disk cost per pack and removal (`$HOME` packs deleted in place, `/usr` packs handed to a terminal) |
+| System | System | Dependencies, rounded-blur, panel-blur fix, login screen, monitor sync |
+| Updates | System | Version and channel, check, install update, reapply settings, full reinstall |
+| Uninstall | none | Built into the stack (other code needs its widgets), opened from the primary menu, not the sidebar |
+
+The order matters: Glass is built before Per-app blur, because the app list asks
+the blur rows which list is active. `SEARCH_INDEX` is a hand-kept set of extra
+search words per page. `FLAG_LABELS` maps flags to pages and labels for the
+"N changes pending" popover and the sidebar dots.
+
+### What doesn't ride on Apply
+
+- **Extension switches** apply immediately through `aura-glass-ext`, streamed into the same log.
+- **Packages**: a filesystem delete under `$HOME`, or the package manager in a terminal for `/usr`.
+- **Anything needing root** (deps `--deps-only`, rounded-blur, GDM, monitor sync, uninstall scopes) and the long operations (reapply settings, full reinstall, update) **open a real terminal** from `TERMINALS` (ptyxis, kgx, gnome-terminal, konsole, alacritty, kitty, foot, wezterm, x-terminal-emulator, xterm). `sudo` down a pipe would block forever. If no terminal is found, the command is shown to copy. Terminals aren't waited on, so those rows show the last state read.
+- **Reapply CSS** runs `aura-glass-apply --force-reload` in a terminal.
+- **Games list** writes `$CONF_DIR/adaptive-fullscreen-apps`, then `aura-glass-adaptive refresh`.
+
+### Live preview
+
+Backed by `bin/aura-glass-preview` and serialized by `gui/preview_queue.py`
+(one active operation, one replaceable pending one; Apply, Revert and Close
+take precedence):
+
+```
+aura-glass-preview begin                       snapshot sheets + BMS dconf dump + memos into $CONF_DIR/preview-backup, mark preview-active
+aura-glass-preview set [--app-tint HEX] [--shell-tint HEX] [--transparency L] [--radius-preset P]
+                       [--radius-custom …] [--blur-strength P] [--popup-blur 0|1] [--popup-brightness P] [--window-brightness P]
+                       [--notification-opacity P] [--window-blur 0|1] [--scope gtk|all, default all]
+                       [--app-blur-allow L] [--app-blur-block L]
+aura-glass-preview apps --allow L --block L [--window-blur 0|1] [--scope …]   per-app only (dconf, no CSS rebuild)
+aura-glass-preview revert [--session S]       restore sheets + BMS subtree byte-for-byte, re-splice
+aura-glass-preview commit --session S -- CMD  run CMD (the Apply); on success drop the journal, on failure revert
+aura-glass-preview status
+```
+
+`set` calls the **same** `apply_*` functions as `install.sh`, with
+`PREVIEW_MODE=1`, against a CSS baseline reset from `css/` on every call, so
+relative rewrites don't compound. **Hard rule:** a preview never leaves a
+`$CONF_DIR` memo different from what it found. `remembering()` is false, so
+nothing is written in the first place. `check-preview.sh` (live) asserts it.
+On startup the window recovers an interrupted preview through the backend and
+reports the real result.
+
+### The D-Bus bridge
+
+`ShellBridge` talks to `io.github.DevWebeloper.AuraGlass` (exported by the Aura
+Glass Helper extension whenever it's enabled). It uses `ListWindows` and
+`WindowsChanged` for "Open now" and the games list, and `SetWindowOpacity` /
+`RefreshOpacity` for live opacity while dragging. The window uses the bridge
+only if it answers.
+
+### Accent: why there's no colour picker
+
+The shell CSS uses `-st-accent-color`, a read-only St keyword backed by the
+`StSystemAccentColor` enum. GTK uses `@accent_bg_color`. A custom hex could
+recolour every app window but none of the shell, which would make two colour
+schemes, not one. So the row offers GNOME's nine accents and keeps the memo in
+step.
+
+---
+
+## 3. Rules for changing either window
+
+1. **Emit flags. Never write theme files or installer memos.** The exceptions are listed in [CONSISTENCY.md](CONSISTENCY.md) §1.1.
+2. **Never reimplement precedence.** If you must know a value before `install.sh` runs, duplicate it **and** add a checker (like `check-gui-radius.py`).
+3. **Send only what changed** (settings window). Send everything (setup wizard).
+4. **Read where the installer reads** (C5), with the same missing-memo defaults.
+5. **Root goes to a terminal.** Long jobs go to a terminal or the async log, never a blocking call on the main loop.
+6. **Wizard parity**: same questions, options and recommendations as the text wizard.
+7. Run `check-gui-flags.py`, `check-wizard-flags.py`, `check-gui-radius.py`, `check-terminal-spawn.py`, `check-preview-queue.py`, `check-apply-lifecycle.py` and `check-apply-feedback.py`.

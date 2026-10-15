@@ -1,262 +1,277 @@
 # Configuration reference
 
-Every path aura-glass writes to, every memo it remembers a setting in, and what
-reads each one back.
+Every flag, memo, path, environment variable and system key Aura Glass reads or
+writes. `$C` = `$CONF_DIR` = `~/.config/aura-glass`.
+
+Column keys used below:
+
+- **Memo** is the top-level file the consumer writes when `remembering()` is true.
+- **Drawer** means the value is also kept per mode in `$C/modes/<mode>/`.
+- **Incr.** is the `--incremental` action the flag maps to. `full` means it
+  forces the complete retune.
 
 ---
 
-## Paths
+## 1. Flags (`install.sh`)
 
-| Path | Contents |
+`./install.sh --help` prints the user-facing list. This table is the
+implementation view.
+
+### Run control
+
+| Flag | Effect |
 |---|---|
-| `~/.config/aura-glass/` | `$CONF_DIR` — the memos, the installed stylesheet copies, `backups/`, `modes/` |
-| `~/.config/aura-glass/backups/` | first-run copies of everything the installer overwrote |
-| `~/.config/aura-glass/modes/<mode>/` | the per-glass-mode tuning drawers |
-| `~/.themes/Aura-Glass/` | the theme, adopted from the upstream installer's `Tahoe-Dark` |
-| `~/.config/gtk-4.0/gtk.css`, `gtk-dark.css` | GTK4 targets, spliced |
-| `~/.config/gtk-3.0/gtk.css` | GTK3 target, spliced (the user's own file — not flattened) |
-| `~/.local/share/gnome-shell/extensions/` | `$EXT_DIR` |
-| `~/.local/share/icons/`, `~/.icons/` | icon and cursor packs |
-| `~/.local/share/fonts/aura-glass/` | fonts `--font` downloaded |
-| `~/.local/bin/` | `aura-glass-apply`, `aura-glass-settings`, `aura-glass-preview`, `aura-glass-ext`, `aura-glass-update-check`, `aura-glass-icon-sync`, `aura-glass-panel-blur`, `aura-glass-gdm-sync`, `aura-glass-open-once` |
-| `~/.local/share/aura-glass/gui/` | `$GUI_DIR` — the installed copy of the settings window |
-| `~/.config/systemd/user/` | the four user units |
-| `~/.cache/aura-glass/src/` | `$SRC_CACHE` — checkouts of pinned upstreams |
-| `~/.cache/aura-glass/preview/` | the preview harness's throwaway profile |
+| *(none, in a TTY)* / `--interactive` | Setup wizard: the GTK window, else the text wizard. |
+| `-y`, `--yes` | Answer yes to prompts (not to `confirm_always`). |
+| `-n`, `--dry-run` | Print what would happen. Skips the writer lock. |
+| `--settings-only` | Retune an existing install: no theme or extension fetch, no root, no network unless a pack or font flag asks for one. |
+| `--incremental` | With `--settings-only`: run only the classified actions (§1.4), else fall back to full. |
+| `--plan-json` | With `--settings-only --incremental --dry-run`: print the action plan as JSON and exit. |
+| `--adaptive-blur active\|restore` | Private to the adaptive worker. Needs `--settings-only --incremental`. Never memoed. |
+| `--deps-only` | Install missing dependencies, then exit (needs root). |
+| `--no-deps` | Never touch the package manager. |
+| `--force` | Reinstall what's present and **reload the dconf preset** over existing extension settings. |
+| `-h`, `--help` | Usage. |
 
-Pre-rename installs used `tahoe-glass` in place of `aura-glass` throughout.
-`bin/aura-glass-apply`, `uninstall.sh` and `lib/steps-migrate.sh` still resolve
-both.
+### Packs and components
+
+| Flag | Default | Memo | Notes |
+|---|---|---|---|
+| `--recommended` / `--extras` | ✓ | none | 6 optional extensions (`EXT_EXTRA_RECOMMENDED`) |
+| `--all-extras` | | none | all 8 (`EXT_EXTRA_ALL`) |
+| `--no-extras` / `--minimal` | | none | foundation only |
+| `--extensions LIST` | | none | comma-separated UUIDs, each must be in `EXT_EXTRA_ALL`. Empty means minimal. |
+| `--full` | | none | all extras + icons + cursors + OSD + panel-blur fix |
+| `--osd` / `--no-osd` | on | none | Custom OSD pill |
+| `--bms-git` / `--no-bms-git` | git | `bms-ref`, `bms-source` | `--no-bms-git` (EGO build) also forces popup and notification blur off |
+| `--rounded-blur` / `--no-rounded-blur` | on | `rounded-blur` (stamp) | gnome-rounded-blur |
+| `--gui` / `--no-gui` | on | none | settings window (needs PyGObject, libadwaita, pycairo) |
+| `--window-menu` / `--no-window-menu` | on | none | "Blur This App" |
+| `--update-check` / `--no-update-check` | on | `update-check` | daily timer |
+| `--panel-blur-fix` / `--no-panel-blur-fix` | on if >1 monitor | `panel-blur-fix` | panel blur rebuild service |
+| `--gdm` / `--no-gdm`, `--gdm-background PATH` | off | `gdm-installed` | root |
+| `--gdm-monitors` (`--sync-monitors`) / `--no-gdm-monitors` | off | `gdm-monitors-synced` | root |
+
+### Look and behaviour
+
+| Flag (aliases) | Values / default | Memo | Drawer | Incr. |
+|---|---|---|---|---|
+| `--accent C` | `blue teal green yellow orange red pink purple slate`. Default `purple` | `accent` | | `accent` (+ `cursor-theme` when the pointer is Moga) |
+| `--glass-mode M` | `frosted` \| `performance` | `glass-mode` | | full |
+| `--blur` / `--no-blur` | `--no-blur` ⇒ performance | (via `glass-mode`) | | full |
+| `--window-blur` / `--no-window-blur` | on. `--no-window-blur` also sets scope `none` and level 0.95 unless a level was given | `window-blur` | | full |
+| `--all-apps-blur` (`--all-app-blur`), `--gtk-apps-blur` (`--gtk-app-blur`), `--app-blur-scope gtk\|all` | **`all`** | `app-blur-scope` | ✓ | full |
+| `--app-blur-allow LIST`, `--app-blur-block LIST` | shipped lists in `core.ini` | `app-blur-allow`, `app-blur-block` (one pattern per line) | | `app-blur` |
+| `--popup-blur` / `--no-popup-blur` | on | `popup-blur` | ✓ | full |
+| `--notification-blur` / `--no-notification-blur` | on | `notification-blur` | ✓ | full |
+| `--app-transparency L` (`--window-opacity`, `--window-transparency`); `--no-app-transparency` (+ the two `--no-` aliases) | `0.70–1.00`, `%`, or `0–255`. 0 = off. Fresh default 0.90 (0.95 without window blur, 1.00 in performance). Buckets snap to 0.82, 0.90 and 0.95 | `app-transparency` (`app-opacity` is always 255 now) | ✓ | `css` for the primary spelling, full for the aliases |
+| `--app-tint-color HEX` | `#000000` | `app-tint-color` | ✓ | `css` |
+| `--shell-tint-color HEX` | `#000000` (inherits app tint if unset) | `shell-tint-color` | ✓ | `css` |
+| `--notification-opacity P` | 10–85, default 40 | `notification-opacity` | ✓ | `css` |
+| `--blur-strength P` | 25–200, default 100 | `blur-strength` | ✓ | full |
+| `--popup-brightness P` | 50–150, default 115 (preset) | `popup-brightness` | ✓ | full |
+| `--window-brightness P` (`--app-brightness`, `--window-blur-brightness`) | 50–150, default 100 | `window-brightness` | ✓ | `window-brightness` (except the last alias, which is full) |
+| `--grain N` / `--no-grain` | 0–1, default 0 | `grain` | | full |
+| `--radius-preset P` | `flat sharp adwaita soft medium default rounded` (`pill` → `rounded`). Default `default` | `radius-preset` | | full |
+| `--radius-custom W,M,Q,N,D,P,O,B` | 8 integers within `radius_bounds`. Implies `custom` | `radius-custom` (a 7-field memo is widened with `,9999`) | | full |
+| `--window-buttons close\|all` | unset = leave GNOME's layout | `window-buttons` | | `window-buttons` |
+| `--titlebar-button-style S` | `minimal` (default), `adwaita`, `material`, `flat` | `titlebutton-style` | | `css` |
+| `--icons X` | `colloid` (flagless default), `reversal`, `hatter`, `-<colour>` variants, `original`, or an installed theme name | `icon-pack` (+ `icons` = resolved name) | | full |
+| `--no-icons` | leave the icon theme alone, permanently | `icon-pack` = `keep` | | full |
+| `--cursors X` | `adwaita` (flagless default), `aosp`, `mactahoe`, `moga`, `original`, or an installed theme | `cursor-pack` | | `cursor-theme` |
+| `--no-cursors` | leave the pointer theme alone | `cursor-pack` = `keep` | | `cursor-theme` |
+| `--cursor-size PX` | 16–128. Unset = never written | `cursor-size` | | `cursor-size` |
+| `--font F` | `system` (default, restores the original), `misans`, `inter`, `sf-pro` | `font` | | full |
+| `--no-wm-buttons`, `--wm-buttons` | deprecated no-ops | none | | full |
+
+> The defaults that front ends **recommend** differ from the installer's flagless
+> defaults: the wizards recommend Reversal icons, Moga (GUI) or AOSP (text)
+> pointers, and 20 px. See [CONSISTENCY.md](CONSISTENCY.md) §3.
+
+### 1.4 Incremental actions (`lib/steps-apply-plan.sh`)
+
+| Action | Runs |
+|---|---|
+| `accent` | `apply_accent` |
+| `cursor-theme` | `install_cursors` (if needed), then `apply_cursor_theme` |
+| `cursor-size` | `apply_cursor_size` |
+| `window-buttons` | `apply_window_buttons` |
+| `window-brightness` | `apply_window_brightness` |
+| `app-blur` | `apply_app_blur` |
+| `css` | `install_css` (the whole CSS pipeline + `aura-glass-apply`) |
+| `adaptive-blur` | `apply_adaptive_blur active\|restore` |
+
+These are ignored by the classifier: `--settings-only --incremental --plan-json --yes -y --dry-run -n`.
+Any other flag makes the action `full`. The incremental path also falls back to
+`full` when `$C/apply-source-fingerprint` (a sha256 of `install.sh`, `lib/*.sh`,
+`tokens.sh`, `aura-glass-apply`, `aura_glass_operation.py`, `css/*.css` and
+`dconf/*.ini`) is absent or differs. **The incremental path doesn't call
+`remember_glass_mode`**, so drawers are not updated (KI-01).
 
 ---
 
-## `$CONF_DIR` memos
+## 2. Memos in `$C`
 
-Each is a plain text file holding one value with a trailing newline, written by
-the `apply_*` function that consumes the setting, and read back on the next
-flagless run. Writes are guarded by `remembering()` — a `--dry-run` and a live
-preview leave none behind.
+Plain text, one value and a trailing newline (lists: one item per line).
+Written by the consumer when `remembering()` is true (not dry-run, not preview,
+not adaptive).
 
-### Look and tuning
+### Look
 
-| File | Holds | Written by |
+| File | Holds | Writer |
 |---|---|---|
-| `glass-mode` | `frosted` \| `transparent` \| `solid` | `remember_glass_mode` |
-| `styling-off` | present = the theme has stood down (solid). Read by `aura-glass-apply` | `sync_styling_marker` |
-| `accent` | one of the nine accent names | `apply_gsettings` |
-| `radius-preset` | canonical preset name, or `custom` (`pill` is normalised to `rounded`) | `apply_radius_css` |
-| `radius-custom` | eight comma-separated pixels, in `WINDOW,MENU,QUICK_SETTINGS,NOTIFICATION,DIALOG,POPUP,OSD,BUTTON` order | `apply_radius_css` |
-| `app-transparency` | `0`, or a two-decimal fraction `0.70`–`1.00` | `install_transparency_css` |
-| `app-opacity` | the same level as 0–255, for the Blur My Shell key | `apply_app_opacity` |
-| `app-tint-color` | hex, e.g. `#000000` | `apply_app_tint_color` |
-| `shell-tint-color` | hex | `apply_shell_tint_color` |
-| `blur-strength` | percent of the tuned sigmas, `25`–`200` | `apply_blur_strength` |
-| `popup-brightness` | percent of the backdrop, `50`–`150` | `apply_popup_brightness` |
-| `notification-opacity` | percent, `10`–`85` | `apply_notification_opacity` |
-| `grain` | noise overlay amount | `apply_grain` |
-| `titlebutton-style` | `minimal` \| `adwaita` \| `material` \| `flat` | `install_window_control_style` |
-| `window-buttons` | the `button-layout` this install wrote | `apply_window_buttons` |
+| `glass-mode` | `frosted` \| `performance` (legacy: `solid`, `transparent`) | `remember_glass_mode` |
+| `styling-off` | present = legacy solid stand-down. Never written by current modes | `sync_styling_marker` |
+| `accent` | one of the nine accents | `apply_accent` |
+| `radius-preset` | canonical preset or `custom` | `apply_radius_css` |
+| `radius-custom` | 8 comma-separated px (`WINDOW,MENU,QUICK_SETTINGS,NOTIFICATION,DIALOG,POPUP,OSD,BUTTON`). Removed for named presets | `apply_radius_css` |
+| `app-transparency` | `0` or `0.70`–`1.00` | `install_transparency_css` |
+| `app-opacity` | BMS applications actor opacity (follows the transparency level, level × 255) | `apply_app_opacity` |
+| `app-tint-color`, `shell-tint-color` | `#rrggbb` | `apply_app_tint_color`, `apply_shell_tint_color` |
+| `notification-opacity` | 10–85 | `apply_notification_opacity` |
+| `blur-strength` | 25–200 | `apply_blur_strength` |
+| `popup-brightness`, `window-brightness` | 50–150 | `apply_popup_brightness`, `apply_window_brightness` |
+| `grain` | 0–1 | `apply_grain` |
+| `titlebutton-style` | `minimal\|adwaita\|material\|flat` | `install_window_control_style` |
+| `window-buttons` | `close\|all` | `apply_window_buttons` |
 
 ### Blur scope
 
-| File | Holds |
-|---|---|
-| `window-blur` | `0` \| `1` — blur behind app windows |
-| `popup-blur` | `0` \| `1` |
-| `notification-blur` | `0` \| `1` |
-| `app-blur-scope` | `gtk` (whitelisted apps) \| `all` (everything but the blocklist) |
-| `app-blur-allow` | one `wm_class` pattern per line; wildcards allowed |
-| `app-blur-block` | one pattern per line |
+| File | Holds | Writer |
+|---|---|---|
+| `window-blur` | `0\|1` | `apply_app_blur` |
+| `app-blur-scope` | `all\|gtk\|none` | `apply_app_blur` |
+| `app-blur-allow`, `app-blur-block` | one wm_class pattern per line (wildcards). The settings window's own class is pinned to allow | `apply_app_blur` (installer, preview `app-blur`, window menu) |
+| `popup-blur`, `notification-blur` | `0\|1` (not written while blur is off) | `apply_popup_blur`, `apply_notification_blur` |
 
-`app-blur-allow` / `app-blur-block` are the only place arbitrary user text
-reaches dconf. `app_blur_literal` builds the GVariant array;
-`tools/check-app-blur-lists.sh` round-trips it through GLib's parser.
+### Mode drawers: `$C/modes/<frosted|performance>/`
 
-The first-party extension writes these two directly when someone uses **Blur
-This App** from the window menu — skipping that mirror would mean a toggle
-holding only until the next `install.sh`, which reads the stale memo over dconf.
+`app-transparency app-tint-color shell-tint-color app-blur-scope popup-blur
+notification-blur blur-strength popup-brightness window-brightness
+notification-opacity`. Created by `seed_glass_mode`, read by
+`load_glass_mode_memos`, `Settings()` and `apply_adaptive_blur restore`, written
+by `save_glass_mode_memos`. Legacy `modes/solid/disabled-extensions` records
+what the old solid mode switched off.
 
-### Adaptive performance
+### Adaptive
 
-| File | Holds |
-|---|---|
-| `adaptive-profile` | `auto` \| `full` \| `performance` — profile selected in the Shell extension or via `aura-glass-adaptive profile` |
-| `adaptive-fullscreen-apps` | one `wm_class` per line — apps that switch to Performance mode when focused and fullscreen in `auto` profile |
-| `adaptive-performance/active` | `1` when adaptive performance no-blur state is currently active, `0` otherwise |
-| `adaptive-performance/reason` | active trigger causes (e.g. `battery`, `gpu`, `game`, `profile`, `battery, gpu`) |
+| File | Holds | Writer |
+|---|---|---|
+| `adaptive-profile` | `auto` (seeded) \| `full` \| `performance` | `aura-glass-adaptive profile`, `install_adaptive_performance` |
+| `adaptive-fullscreen-apps` | wm_class per line | settings app |
+| `adaptive-install` | absolute path of the `install.sh` the worker runs | `install_adaptive_performance` |
+| `adaptive-performance/active` | `0\|1` | worker, `install_adaptive_performance` |
+| `adaptive-performance/reason` | e.g. `normal`, `battery`, `gpu`, `game`, `performance`, `no-blur` | worker, installer |
+| `adaptive-performance/saved-bms-blur` | `component/blur=value` lines while active | `apply_adaptive_blur` |
 
 ### Assets
 
-| File | Holds |
-|---|---|
-| `icons` | the resolved icon theme name actually set (`icon_base`) |
-| `icon-pack` | the pack as asked for (`colloid-teal`, `hatter-slate`, …), or `keep` for `--no-icons` |
-| `cursor-pack` | `adwaita` \| `aosp` \| `mactahoe` \| `moga` \| `original`, or `keep` |
-| `cursor-size` | pixels, only ever written when `--cursor-size` was given |
-| `font` | `system` \| `misans` \| `inter` \| `sf-pro` |
+| File | Holds | Writer |
+|---|---|---|
+| `icon-pack` | as asked (`colloid`, `reversal-cyan`, `hatter-slate` …) or `keep` | `install_icons` / `apply_gsettings` |
+| `icons` | the resolved icon theme base name | `lib/steps-assets.sh` |
+| `cursor-pack` | `adwaita\|aosp\|mactahoe\|moga\|original\|<theme>` or `keep` | `apply_cursor_theme` |
+| `cursor-size` | px. Only when given | `apply_cursor_size` |
+| `font` | `system\|misans\|inter\|sf-pro` | `apply_font` |
 
 ### Machinery
 
-| File | Holds |
-|---|---|
-| `repo-path` | the checkout the settings window must run `install.sh` from |
-| `panel-blur-fix` | `0` \| `1` — the multi-monitor panel blur unit |
-| `update-check` | `0` \| `1` — the daily timer |
-| `update-available` | the version a check found, so the window can offer it |
-| `rounded-blur` | the `gnome-rounded-blur` build stamp |
-| `bms-ref` / `bms-source` | the Blur My Shell commit installed, and `git` or `ego` |
-| `custom-osd-patch` | patch stamp, so a re-run knows the patch is already in |
-| `gdm-installed` | `dynamic` when the login screen was themed |
-| `gdm-monitors-synced` | present = the monitor layout was pushed to GDM |
-| `accent-from-wallpaper` | set when `auto-accent-colour` was installed, so the accent row can warn |
-| `preview-active` / `preview-backup` | `aura-glass-preview`'s in-flight state and its snapshot |
+| File | Holds | Writer / reader |
+|---|---|---|
+| `repo-path` | the checkout the GUI, preview, update check and worker run from. **Only written when the GUI is installed** | `install_gui` |
+| `apply-source-fingerprint` | sha256 of the apply sources | `--incremental` full fallback |
+| `panel-blur-fix`, `update-check` | `0\|1` | `install_panel_blur_unit`, `install_update_check` |
+| `update-available` | the version a check found | `aura-glass-update-check` |
+| `rounded-blur` | build stamp | `rounded_blur_stamp` |
+| `bms-ref`, `bms-source` | installed BMS commit and `git\|ego` | `install_bms` |
+| `custom-osd-patch` (legacy `openbar-patch`) | patch stamps | `patch_stamp_write` |
+| `gdm-installed`, `gdm-monitors-synced` | login-screen state | `lib/steps-gdm.sh` |
+| `accent-from-wallpaper` | opt-in marker for the (currently uncatalogued) auto-accent extension | `bin/aura-glass-ext` writes it; `lib/steps-extensions.sh` reads it |
+| `preview-active`, `preview-backup/` | live preview marker and journal (sheets, BMS dump, memos, session id) | `aura-glass-preview` |
+| `uninstalled` | written by `uninstall.sh`, removed by the next install | |
+| `shell-*.css`, `gtk4-*.css`, `gtk3-*.css` | installed, rewritten copies spliced by `aura-glass-apply` | `install_css` |
 
-### Per-mode drawers
-
-`$CONF_DIR/modes/<frosted|transparent|solid>/` holds a mode's own copy of:
-
-```
-app-transparency  app-tint-color  shell-tint-color  blur-strength
-popup-brightness  notification-opacity  popup-blur  notification-blur
-app-blur-scope    (frosted only)
-```
-
-plus, for solid only, `disabled-extensions` — the record of what
-`stand_down_extensions` switched off, so `restore_extensions` can put exactly
-that set back.
-
-`seed_glass_mode` creates a drawer on first entry. Transparent seeds
-`app-transparency` at `0.82` unconditionally rather than inheriting the shared
-memo: that value belongs to frosted, tuned for a blurred window behind it. Tints
-*are* inherited — a colour preference travels with the user, an opacity level is
-coupled to whether there is blur behind the glass.
-
-### Installed stylesheet copies
-
-`$CONF_DIR` also holds the copies `aura-glass-apply` concatenates:
-`shell-NN-*.css`, `gtk4-NN-*.css`, `gtk3-tweaks.css`, `gtk4-transparency.css`,
-the three `{gtk3,gtk4}-window-controls-*` variants (one installed at a time),
-`shell-popup-blur.css`, `shell-notification-blur.css`, `shell-80-solid.css`, and
-the generated `shell-90-density.css`.
-
-An **optional** sheet is installed or deleted by `install_css`, never switched
-on at read time — `aura-glass-apply` concatenates whatever it finds and cannot
-know which flags this install was given.
-
----
-
-## `$CONF_DIR/backups/`
-
-First-run copies, taken by `backup_once` before anything is overwritten:
+### `$C/backups/`
 
 | Record | Meaning |
 |---|---|
-| `<name>.orig` | the file as it was before aura-glass first ran |
-| `<name>.absent` | there was no such file before aura-glass created it |
-| `<name>.stood-down` | a `.absent`-recorded file moved aside by solid mode, kept for the way back |
+| `<name>.orig` | the file before Aura Glass first ran |
+| `<name>.absent` | there was no file. Uninstall deletes ours |
+| `<name>.stood-down` | a `.absent` file moved aside by legacy solid mode |
 
-Four names are tracked: `gnome-shell.css`, `gtk4-gtk.css`, `gtk4-gtk-dark.css`,
-`gtk3-gtk.css`. `gsettings_backup_once` records the original value of every
-gsettings key the installer writes, which is what `gsettings_original` reads
-back for `--font system` and for uninstall.
-
-`uninstall.sh` restores the `.orig` or deletes the `.absent`. Standing down is
-deliberately different: it moves a `.absent` file aside instead of deleting it,
-because solid is a mode and coming back out of it must be one run with nothing
-lost.
+Names: `gnome-shell.css`, `gtk4-gtk.css`, `gtk4-gtk-dark.css`, `gtk3-gtk.css`.
+`gsettings_backup_once` keeps the original icon-theme, cursor-theme,
+cursor-size and font keys (what `original` / `system` restore).
 
 ---
 
-## gsettings keys written
+## 3. System keys written
 
-| Schema / key | When |
+### gsettings
+
+| Key | When |
 |---|---|
-| `org.gnome.desktop.interface color-scheme` = `prefer-dark` | always |
-| `org.gnome.desktop.interface accent-color` | `--accent` |
-| `org.gnome.desktop.interface gtk-theme` | when styling is on |
-| `org.gnome.desktop.interface icon-theme` | unless `--no-icons` |
-| `org.gnome.desktop.interface cursor-theme` | unless `--no-cursors` |
-| `org.gnome.desktop.interface cursor-size` | only when `--cursor-size` given |
-| `org.gnome.desktop.interface font-name`, `document-font-name` | `--font` |
-| `org.gnome.desktop.wm.preferences titlebar-font` | `--font` |
+| `org.gnome.desktop.interface color-scheme` = `prefer-dark` | every full run or full retune (`apply_gsettings`) |
+| `org.gnome.desktop.interface accent-color` | `apply_accent` |
+| `org.gnome.desktop.interface gtk-theme` = `Aura-Glass` | styling on |
+| `org.gnome.desktop.interface icon-theme` | unless `--no-icons` (then the icon-sync service follows light/dark) |
+| `org.gnome.desktop.interface cursor-theme`, `cursor-size` | unless `--no-cursors` / only if size given |
+| `org.gnome.desktop.interface font-name`, `document-font-name`; `org.gnome.desktop.wm.preferences titlebar-font` | `--font` (sizes kept) |
 | `org.gnome.desktop.wm.preferences button-layout` | `--window-buttons` |
-| `org.gnome.shell enabled-extensions` | enabling / standing down |
-| `org.gnome.shell.extensions.user-theme name` | toggled by `aura-glass-apply` to force a reload |
+| `org.gnome.shell enabled-extensions` / `disabled-extensions` | enabling, queuing |
+| `org.gnome.shell disable-extension-version-validation` = `true` | every `apply_gsettings` |
+| `org.gnome.shell.extensions.user-theme name` | set to `Aura-Glass`; toggled by `aura-glass-apply` to reload |
 
-`--no-icons` and `--no-cursors` mean the key is **never written**, so a choice
-made in GNOME Tweaks or anywhere else stands — and the memo records that, so
-later runs leave it alone too.
-
-Font sizes are never changed: `apply_font` writes the new family at whatever
-size the key already carried (`font_size_now`).
-
----
-
-## dconf
-
-| File | Loaded when |
-|---|---|
-| `dconf/core.ini` | every install with styling on — every extension's settings in one preset |
-| `dconf/extras.ini` | with the optional extensions |
-| `dconf/solid.ini` | on top of core, by `--no-blur` |
-
-Solid **mode** never loads any of them: loading `core.ini` is exactly the
-"modifying the extension" that standing down avoids. The extensions are disabled
-with their settings intact.
-
-Individual keys are then overwritten from this run's resolved flags by the
-`apply_*` functions in `lib/steps-dconf.sh` — see
-[ARCHITECTURE.md §7](ARCHITECTURE.md#7-dconf-and-gsettings).
-
-The subtrees touched:
+### dconf subtrees
 
 ```
-/org/gnome/shell/extensions/blur-my-shell/…      panel, popup, applications,
-                                                 overview, window-list, dash-to-dock
-/org/gnome/shell/extensions/custom-osd/…         the volume/brightness pill
-/org/gnome/shell/extensions/just-perfection/…    and the rest of extras.ini
+/org/gnome/shell/extensions/blur-my-shell/   pipelines, panel, popup (+ patched notification key), applications,
+                                             overview, appfolder, lockscreen, window-list, screenshot, dash-to-dock, …
+/org/gnome/shell/extensions/custom-osd/
+/org/gnome/shell/extensions/{vitals,hotedge,appindicator}/   (extras.ini)
 ```
 
 ---
 
-## Environment variables
+## 4. Environment variables
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `AURA_GLASS_DIR` | `aura-glass-apply`, `aura-glass-preview` | override `$CONF_DIR` |
-| `AURA_GLASS_CONF` | `aura-glass-update-check` | override `$CONF_DIR` for the update check (this is what its test fixtures set) |
-| `AURA_GLASS_THEME` | `aura-glass-apply`, `preview.sh` | override the theme directory name |
-| `AURA_GLASS_GUI` | `aura-glass-settings` | run the window from a checkout's `gui/` instead of the installed copy |
-| `AURA_GLASS_ICONS` | `aura-glass-icon-sync` | the icon theme base name to follow light/dark with |
-| `AURA_GLASS_BLUR_SETTLE` | `aura-glass-panel-blur` | seconds to wait for the desktop to settle, default 3 |
-| `AURA_PREVIEW_DIR` | `preview.sh` | the harness's throwaway profile directory |
-| `AURA_PREVIEW_SHOTS` | `preview.sh` | where preview PNGs land |
-| `AURA_PREVIEW_RES` | `preview.sh` | preview resolution, default `1920x1080` |
-| `AURA_SHOT_BASELINE` | `check-shots.py` | where accepted baselines live |
-| `AURA_GPU_LOG` | `gpu-live.sh` | the measurement log |
-| `PREVIEW_MODE=1` | `lib/common.sh` | makes `remembering()` false — no memo is written |
-| `DRY_RUN=1` | `lib/common.sh` | same, plus `run()` prints instead of executing |
+| `AURA_GLASS_DIR` (`TAHOE_GLASS_DIR`) | `aura-glass-apply`, `aura-glass-preview`, adaptive worker | override `$C` |
+| `AURA_GLASS_CONF` | `aura-glass-update-check` | override `$C` (test fixtures) |
+| `AURA_GLASS_THEME` (`TAHOE_GLASS_THEME`) | `aura-glass-apply`, preview harness | theme directory name |
+| `AURA_GLASS_GUI` | `aura-glass-settings` | run the window from a checkout's `gui/` |
+| `AURA_GLASS_ICONS` | `aura-glass-icon-sync` | icon base to follow |
+| `AURA_GLASS_BLUR_SETTLE` | `aura-glass-panel-blur` | settle seconds (default 3) |
+| `AURA_GLASS_OPERATION_TIMEOUT` | operation lock | seconds to wait (default 30) |
+| `AURA_GLASS_OPERATION_FD` | operation lock | the inherited lock descriptor (internal) |
+| `AURA_GLASS_OPERATION_PREVIEW` | operation lock | which `aura-glass-preview` handles `app-blur` (set for checkout runs) |
+| `AURA_GLASS_OPERATION` | adaptive worker | operation command path |
+| `AURA_GLASS_ADAPTIVE_WORKER` | `aura-glass-adaptive` | worker path override |
+| `AURA_GLASS_ADAPTIVE_INTERVAL`, `AURA_GLASS_ADAPTIVE_SUSTAINED` | worker | sample period (2 s), GPU samples to trigger (3) |
+| `AURA_PREVIEW_DIR`, `AURA_PREVIEW_SHOTS`, `AURA_PREVIEW_RES` | `tools/preview.sh` | harness profile, output, resolution |
+| `AURA_SHOT_BASELINE` | `check-shots.py` | accepted baselines |
+| `AURA_GPU_LOG` | `gpu-live.sh` | measurement log |
+| `DRY_RUN=1`, `PREVIEW_MODE=1` | `lib/common.sh` | `run` prints only / `remembering()` false |
 | `NO_COLOR` | `lib/common.sh` | plain output |
-
-Every `AURA_*` name above also answers to its `TAHOE_*` spelling, for pre-rename
-installs.
 
 ---
 
-## systemd user units
+## 5. Paths
 
-```
-aura-glass-icon-sync.service       follow light/dark with the icon theme
-aura-glass-panel-blur.service      rebuild panel blur after the desktop settles
-aura-glass-gdm-sync.service        push wallpaper + primary monitor to GDM
-aura-glass-update-check.service    one git ls-remote
-aura-glass-update-check.timer      daily, 15 min after boot
-```
+| Path | Contents |
+|---|---|
+| `~/.config/aura-glass/` | `$C` |
+| `~/.themes/Aura-Glass/` | the theme (adopted from `Tahoe-Dark`) |
+| `~/.config/gtk-4.0/gtk.css`, `gtk-dark.css`; `~/.config/gtk-3.0/gtk.css` | spliced targets |
+| `~/.local/share/gnome-shell/extensions/` | `$EXT_DIR` |
+| `~/.local/bin/` | the commands in [STRUCTURE.md](STRUCTURE.md) §1 |
+| `~/.local/share/aura-glass/` | GUI copy, the three Python workers |
+| `~/.config/systemd/user/` | the units |
+| `~/.cache/aura-glass/src/` | pinned checkouts (`$SRC_CACHE`) |
+| `~/.cache/aura-glass/operation.lock` | the writer lock |
+| `~/.local/share/fonts/aura-glass/` | downloaded fonts |
+| `~/.local/lib/libblur-effect-1.0.so*` | rootless gnome-rounded-blur build |
 
-```bash
-systemctl --user status aura-glass-panel-blur.service
-systemctl --user list-timers aura-glass-update-check.timer
-```
-
-The update check notifies **once per release**, not once per day, and never
-installs anything — that is a button in the settings window.
+Pre-rename installs used `tahoe-glass` everywhere. `lib/steps-migrate.sh`,
+`aura-glass-apply` and `uninstall.sh` resolve both.

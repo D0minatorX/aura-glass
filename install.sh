@@ -93,8 +93,10 @@ WANT_STYLING=1           # 0 = the theme stands down (solid mode)
 VALID_GLASS_MODES="frosted performance"
 WANT_WINDOW_BLUR=1
 WINDOW_BLUR_EXPLICIT=""
-APP_BLUR_SCOPE="gtk"     # gtk (default, whitelisted GTK/GNOME apps) | all
+APP_BLUR_SCOPE="all"     # all (default, all application windows) | gtk (whitelisted GTK/GNOME apps)
 APP_BLUR_SCOPE_EXPLICIT=""
+WINDOW_BRIGHTNESS=""     # empty = remembered choice, then 100
+WINDOW_BRIGHTNESS_EXPLICIT=""
 APP_BLUR_ALLOW=""        # comma-separated wm_class patterns
 APP_BLUR_ALLOW_EXPLICIT=""
 APP_BLUR_BLOCK=""
@@ -171,9 +173,9 @@ ${C_BLD}aura-glass${C_OFF} — a fluid frosted-glass desktop for GNOME 48-51
     --recommended     Core package: the foundation plus six curated optional
                       extensions (the default)
     --full            Complete Experience: every optional piece at once — all
-                      14 extra extensions, plus icons, cursors, OSD and panel-blur-fix
+                      8 extra extensions, plus icons, cursors, OSD and panel-blur-fix
     --extras          alias for --recommended (Core)
-    --all-extras      Complete Experience extension package: all 14 optionals
+    --all-extras      Complete Experience extension package: all 8 optionals
     --no-extras       Minimal package: the foundation only, with no optionals
     --minimal         alias for --no-extras (Minimal)
     --extensions LIST comma-separated extension UUIDs to install instead of a
@@ -189,6 +191,10 @@ ${C_BLD}aura-glass${C_OFF} — a fluid frosted-glass desktop for GNOME 48-51
                       how bright the blur behind menus, Quick Settings and
                       notification banners comes out, as a percentage of the
                       backdrop: 50-150, 100 leaves it alone (remembered)
+    --window-brightness P
+                      how bright the blur behind application windows comes out,
+                      as a percentage of the backdrop: 50-150, 100 leaves it alone
+                      (remembered)
     --notification-opacity P
                       how much ground an arriving banner paints over that blur:
                       10-85 (remembered)
@@ -238,10 +244,10 @@ ${C_BLD}aura-glass${C_OFF} — a fluid frosted-glass desktop for GNOME 48-51
                       and --no-notification-blur)
     --app-transparency LEVEL
                       window transparency with blur: 90% (230, default), 82% (210),
-                      94% (240), or custom 70%-100% (e.g. --app-transparency 90%). Off by default
+                      94% (240), or custom 70%-100% (e.g. --app-transparency 90%)
     --window-opacity LEVEL
                       alias for --app-transparency (e.g. 90%, 82%, 94%, 230, 210, 240)
-    --no-app-transparency keep app windows opaque (default)
+    --no-app-transparency keep app windows opaque
     --app-blur-allow LIST
                       comma-separated wm_class patterns to blur in GTK/GNOME mode,
                       replacing the shipped list (e.g. 'org.gnome.Nautilus,*term*').
@@ -260,9 +266,9 @@ ${C_BLD}aura-glass${C_OFF} — a fluid frosted-glass desktop for GNOME 48-51
                       hover), adwaita (always-visible neutral disc), material
                       (solid discs, close filled red) or flat (glyph only, no
                       disc ever). Remembered for later runs
-    --window-blur     blur behind app windows (default: on behind GTK/GNOME apps)
-    --gtk-apps-blur   blur behind GTK / GNOME applications only (Files, Settings, Terminal - default, low CPU)
-    --all-apps-blur   blur behind all application windows (heavy on CPU/GPU)
+    --window-blur     blur behind app windows (default: on behind all apps)
+    --gtk-apps-blur   blur behind GTK / GNOME applications only (Files, Settings, Terminal - low CPU)
+    --all-apps-blur   blur behind all application windows (default, heavy on CPU/GPU)
     --no-window-blur  keep window blur off (opaque windows)
     --glass-mode M    frosted (blur behind windows and popups) or performance
                       (blur shaders disabled, zero GPU overhead, customizable
@@ -333,6 +339,10 @@ parse_flags() {
         --adaptive-blur=*) ADAPTIVE_BLUR="${1#*=}"; EXPLICIT_FLAGS=1; shift ;;
         --popup-brightness) POPUP_BRIGHTNESS="${2:-100}"; EXPLICIT_FLAGS=1; shift 2 ;;
         --popup-brightness=*) POPUP_BRIGHTNESS="${1#*=}"; EXPLICIT_FLAGS=1; shift ;;
+        --window-brightness|--app-brightness|--window-blur-brightness)
+            WINDOW_BRIGHTNESS="${2:-100}"; WINDOW_BRIGHTNESS_EXPLICIT=1; EXPLICIT_FLAGS=1; shift 2 ;;
+        --window-brightness=*|--app-brightness=*|--window-blur-brightness=*)
+            WINDOW_BRIGHTNESS="${1#*=}"; WINDOW_BRIGHTNESS_EXPLICIT=1; EXPLICIT_FLAGS=1; shift ;;
         --notification-opacity) NOTIFICATION_OPACITY="${2:-40}"; EXPLICIT_FLAGS=1; shift 2 ;;
         --notification-opacity=*) NOTIFICATION_OPACITY="${1#*=}"; EXPLICIT_FLAGS=1; shift ;;
         --app-tint-color) APP_TINT_COLOR="${2:-}"; EXPLICIT_FLAGS=1; shift 2 ;;
@@ -508,13 +518,14 @@ EOF
             ;;
         *)
             WANT_QUICK_START=1
-            # The recommended pair, stated explicitly the way the GUI wizard's
-            # Answers() defaults do — install.sh's own flagless default is
-            # Colloid and Adwaita (ICONS/CURSORS below), which is a different,
-            # older answer than the one this project actually recommends now.
+            # The recommended pair, Reversal and Moga, stated explicitly the way
+            # the GUI wizard's Answers() defaults do. install.sh's own flagless
+            # default stays Colloid and Adwaita (ICONS/CURSORS below) on
+            # purpose: a bare ./install.sh in a script should not start
+            # fetching packs it never asked for (KI-05).
             ICONS="reversal"
             WANT_ICONS=1
-            CURSORS="aosp"
+            CURSORS="moga"
             WANT_CURSORS=1
             WANT_OSD=1
             # Every extension: the same array --all-extras and the GUI
@@ -533,7 +544,7 @@ EOF
                 fi
             fi
             # Blur mode, scope and transparency are left untouched here: the
-            # top-of-script defaults (WANT_BLUR=1, APP_BLUR_SCOPE=gtk) and the
+            # top-of-script defaults (WANT_BLUR=1, APP_BLUR_SCOPE=all) and the
             # remembered-value resolution below (APP_TRANSPARENCY, further
             # down this script) already land on frosted glass at 90% on a
             # fresh install with nothing overriding them — which is the same
@@ -598,8 +609,8 @@ EOF
 
     # Question 2: App window blur target scope
     printf '\n  App Window Blur Target:\n'
-    printf '    %s[1]%s GTK / GNOME Applications only %s[Default — Files, Settings, Terminal (Low CPU)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '    %s[2]%s All Applications %s[Heavy — blurs browsers, Electron, Discord]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[1]%s All Applications %s[Default — blurs browsers, Electron, Discord too]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[2]%s GTK / GNOME Applications only %s[Files, Settings, Terminal (Low CPU)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
     printf '    %s[3]%s No blur on windows %s[95%% subtle translucency, crisp text, 0 CPU overhead]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
     printf '  Choice [1-3, default: 1]: '
     read -r ans_scope || ans_scope="1"
@@ -613,19 +624,19 @@ EOF
             APP_OPACITY=255
             printf '  %s✓%s Window blur disabled; app transparency set to 95%% (readable text)\n\n' "$C_GRN" "$C_OFF"
             ;;
-        2|all|every)
-            WANT_WINDOW_BLUR=1
-            WINDOW_BLUR_EXPLICIT=1
-            APP_BLUR_SCOPE="all"
-            APP_BLUR_SCOPE_EXPLICIT=1
-            printf '  %s✓%s Window blur enabled for ALL applications (Heavy CPU/GPU)\n' "$C_GRN" "$C_OFF"
-            ;;
-        *)
+        2|gtk|gnome)
             WANT_WINDOW_BLUR=1
             WINDOW_BLUR_EXPLICIT=1
             APP_BLUR_SCOPE="gtk"
             APP_BLUR_SCOPE_EXPLICIT=1
             printf '  %s✓%s Window blur enabled for GTK / GNOME applications only\n' "$C_GRN" "$C_OFF"
+            ;;
+        *)
+            WANT_WINDOW_BLUR=1
+            WINDOW_BLUR_EXPLICIT=1
+            APP_BLUR_SCOPE="all"
+            APP_BLUR_SCOPE_EXPLICIT=1
+            printf '  %s✓%s Window blur enabled for ALL applications\n\n' "$C_GRN" "$C_OFF"
             ;;
     esac
 
@@ -654,27 +665,33 @@ EOF
                 ;;
         esac
     fi
+    # An answer, the same as the window wizard's --app-transparency flag: left
+    # unmarked, load_glass_mode_memos would replace it with the drawer's level.
+    if [ -n "${APP_TRANSPARENCY:-}" ]; then
+        APP_TRANSPARENCY_EXPLICIT=1
+        APP_OPACITY_EXPLICIT=1
+    fi
 
     # 3. Icons & Cursors
     printf '%sStep 3: Icons, Cursors & Font%s\n' "$C_BLD" "$C_OFF"
     printf '  Icon Theme:\n'
-    printf '    %s[1]%s Colloid %s[Default — matches accent (%s)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$ACCENT" "$C_OFF"
-    printf '    %s[2]%s Reversal %s[macOS-style circular icons]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '    %s[3]%s Hatter %s[Rounded squares, matches accent (%s)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$ACCENT" "$C_OFF"
+    # Same options, order and recommendation as the GTK wizard's page_icons.
+    printf '    %s[1]%s Reversal %s[Recommended — round, flatter, a colour of its own]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[2]%s Hatter %s[Rounded squares, matches accent (%s)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$ACCENT" "$C_OFF"
+    printf '    %s[3]%s Colloid %s[Matches accent (%s)]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$ACCENT" "$C_OFF"
     printf '    %s[4]%s Default %s[Your current icon theme, left alone]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
     printf '  Choice [1-4, default 1]: '
     read -r ans_icon || ans_icon="1"
     case "$ans_icon" in
-        2|reversal)
-            # Bare, so accent_to_reversal picks a colour Reversal actually ships.
-            # "reversal-$ACCENT" was three broken answers out of nine here.
-            ICONS="reversal"
+        3|colloid)
+            ICONS="colloid"
             WANT_ICONS=1
-            printf '  %s✓%s Reversal icon theme selected (%s)\n' "$C_GRN" "$C_OFF" "$ACCENT"
+            printf '  %s✓%s Colloid icon theme selected\n' "$C_GRN" "$C_OFF"
             ;;
-        3|hatter)
-            # Bare for the same reason, though Hatter is the easy case: it has a
-            # variant for all nine accents under the accents' own names.
+        2|hatter)
+            # Bare for the same reason as Reversal below, though Hatter is the
+            # easy case: it has a variant for all nine accents under the
+            # accents' own names.
             ICONS="hatter"
             WANT_ICONS=1
             printf '  %s✓%s Hatter icon theme selected (%s)\n' "$C_GRN" "$C_OFF" "$ACCENT"
@@ -684,38 +701,47 @@ EOF
             printf '  %s✓%s Icons left alone — nothing here writes the icon theme\n' "$C_GRN" "$C_OFF"
             ;;
         *)
-            ICONS="colloid"
+            # Bare, so accent_to_reversal picks a colour Reversal actually ships.
+            # "reversal-$ACCENT" was three broken answers out of nine here.
+            ICONS="reversal"
             WANT_ICONS=1
-            printf '  %s✓%s Colloid icon theme selected\n' "$C_GRN" "$C_OFF"
+            printf '  %s✓%s Reversal icon theme selected (%s)\n' "$C_GRN" "$C_OFF" "$ACCENT"
             ;;
     esac
 
     printf '  Cursor Theme:\n'
-    printf '    %s[1]%s Stock Adwaita %s[Default — sharp and crisp]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '    %s[2]%s MacTahoe %s[macOS Tahoe style cursors]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '    %s[3]%s AOSP %s[Android pointers, scalable with a soft shadow]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '    %s[4]%s Default %s[Your current cursor theme, left alone]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
-    printf '  Choice [1-4, default 1]: '
+    # Same options, order and recommendation as the GTK wizard's page_cursors.
+    printf '    %s[1]%s Moga Neon %s[Recommended — accent-matched neon pointers]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[2]%s AOSP %s[Android pointers, scalable with a soft shadow]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[3]%s Adwaita %s[GNOME'"'"'s own pointers, sharp at any size]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[4]%s MacTahoe %s[macOS Tahoe style pointers]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '    %s[5]%s Default %s[Your current cursor theme, left alone]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
+    printf '  Choice [1-5, default 1]: '
     read -r ans_cursor || ans_cursor="1"
     case "$ans_cursor" in
-        2|mactahoe)
-            CURSORS="mactahoe"
-            WANT_CURSORS=1
-            printf '  %s✓%s MacTahoe cursors selected\n\n' "$C_GRN" "$C_OFF"
-            ;;
-        3|aosp)
+        2|aosp)
             CURSORS="aosp"
             WANT_CURSORS=1
             printf '  %s✓%s AOSP cursors selected\n\n' "$C_GRN" "$C_OFF"
             ;;
-        4|default|keep|none)
+        3|adwaita)
+            CURSORS="adwaita"
+            WANT_CURSORS=1
+            printf '  %s✓%s Adwaita cursors selected\n' "$C_GRN" "$C_OFF"
+            ;;
+        4|mactahoe)
+            CURSORS="mactahoe"
+            WANT_CURSORS=1
+            printf '  %s✓%s MacTahoe cursors selected\n\n' "$C_GRN" "$C_OFF"
+            ;;
+        5|default|keep|none)
             WANT_CURSORS=0
             printf '  %s✓%s Pointer left alone — nothing here writes the cursor theme\n\n' "$C_GRN" "$C_OFF"
             ;;
         *)
-            CURSORS="adwaita"
+            CURSORS="moga"
             WANT_CURSORS=1
-            printf '  %s✓%s Adwaita cursors selected\n' "$C_GRN" "$C_OFF"
+            printf '  %s✓%s Moga Neon cursors selected (%s)\n' "$C_GRN" "$C_OFF" "$ACCENT"
             ;;
     esac
 
@@ -784,7 +810,7 @@ EOF
     printf '\n  Extension Package:\n'
     printf '    %s[1]%s Core %s[Default — foundation plus 6 curated extensions]%s\n' "$C_BLD" "$C_OFF" "$C_DIM" "$C_OFF"
     printf '        • AppIndicator Support (System tray icons for Steam, Discord, etc.)\n'
-    printf '        • Magic Lamp Effect (macOS Genie window minimize effect)\n'
+    printf '        • Quick Settings Audio Panel (Per-app volume mixer in Quick Settings)\n'
     printf '        • Tiling Assistant (Window snap assist & 2x2 quarter tiling)\n'
     printf '        • Hot Edge (Overview/dock trigger by touching bottom edge)\n'
     printf '        • Kiwi Menu (macOS-style Applications menu in top bar)\n'
@@ -867,7 +893,7 @@ EOF
 
     # 7. Summary & Confirmation
     blur_desc="Frosted Glass"
-    [ "$WANT_BLUR" = 0 ] && blur_desc="Solid (No blur)"
+    [ "$WANT_BLUR" = 0 ] && blur_desc="Performance (No blur)"
     popup_desc="Enabled"
     [ "$WANT_POPUP_BLUR" = 0 ] && popup_desc="Disabled (Flat)"
     notification_desc="Enabled"
@@ -930,7 +956,7 @@ fi
 
 # --extensions replaces the pack with a list of your own, which is what the setup
 # wizard's per-extension switches send: a pack name cannot say "the recommended
-# six, but not the magic lamp".
+# six, but not the audio panel".
 #
 # Every UUID is checked against what --all-extras would install rather than taken
 # on trust. A misspelled one would otherwise be looked for on the extensions site,
@@ -1033,6 +1059,23 @@ if [ -n "$ADAPTIVE_BLUR" ]; then
 fi
 
 if [ -z "$ADAPTIVE_BLUR" ]; then
+    # A dry run seeds and reads a scratch copy of the drawers (see modes_root
+    # in lib/steps-modes.sh), so it resolves like the real run without writing
+    # modes/ into $CONF_DIR. AURA_GLASS_DRY_MODES names a drawer directory to
+    # use instead and keep: tools/check-glass-modes.sh points it at its fixture
+    # so it can assert on what seeding wrote, across several dry runs.
+    MODES_ROOT=""
+    if [ "$DRY_RUN" = 1 ]; then
+        if [ -n "${AURA_GLASS_DRY_MODES:-}" ]; then
+            MODES_ROOT="$AURA_GLASS_DRY_MODES"
+        else
+            MODES_ROOT="$(mktemp -d)"
+            trap 'rm -rf "$MODES_ROOT"' EXIT
+            if [ -d "$CONF_DIR/modes" ]; then
+                cp -a "$CONF_DIR/modes/." "$MODES_ROOT/"
+            fi
+        fi
+    fi
     seed_glass_mode
     load_glass_mode_memos
 fi
@@ -1077,7 +1120,12 @@ fi
 if [ -z "$APP_BLUR_SCOPE_EXPLICIT" ] && [ -r "$CONF_DIR/app-blur-scope" ]; then
     APP_BLUR_SCOPE="$(cat "$CONF_DIR/app-blur-scope" 2>/dev/null || true)"
 fi
-APP_BLUR_SCOPE="${APP_BLUR_SCOPE:-gtk}"
+APP_BLUR_SCOPE="${APP_BLUR_SCOPE:-all}"
+
+if [ -z "$WINDOW_BRIGHTNESS_EXPLICIT" ] && [ -r "$CONF_DIR/window-brightness" ]; then
+    WINDOW_BRIGHTNESS="$(cat "$CONF_DIR/window-brightness" 2>/dev/null || true)"
+fi
+WINDOW_BRIGHTNESS="${WINDOW_BRIGHTNESS:-100}"
 
 # No default: empty means the key is not ours to write. apply_window_buttons
 # reads the memo itself, so this only has to validate what a flag asked for —
@@ -1389,13 +1437,21 @@ if [ "$SETTINGS_ONLY" = 1 ]; then
                     cursor-theme) apply_cursor_theme ;;
                     cursor-size) apply_cursor_size ;;
                     window-buttons) apply_window_buttons ;;
+                    window-brightness) apply_window_brightness ;;
                     app-blur) apply_app_blur ;;
                     css) install_css ;;
+                    app-opacity) apply_app_opacity ;;
                     adaptive-blur)
                         apply_adaptive_blur "$ADAPTIVE_BLUR"
                         ;;
                 esac
             done
+            # The mode drawer is what the next full run, the settings window
+            # and an adaptive restore all read these values back from. The
+            # narrow path updated the top-level memos; without this the drawer
+            # kept the previous tint/level and the next full Apply put it back.
+            # An adaptive transition is transient and must not touch it.
+            [ -n "$ADAPTIVE_BLUR" ] || remember_glass_mode
             step "Done"
             exit 0
         fi

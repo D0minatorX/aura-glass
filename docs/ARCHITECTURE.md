@@ -1,467 +1,420 @@
 # Architecture
 
-How aura-glass turns a command line into a themed desktop, and why it is built
-the way it is.
+How Aura Glass turns a command line into a themed desktop, and why it's built
+this way. File-by-file detail is in [STRUCTURE.md](STRUCTURE.md). Every flag
+and memo is in [CONFIG-REFERENCE.md](CONFIG-REFERENCE.md).
 
 ---
 
-## 1. The shape of the thing
-
-There is no compiler and no package. The whole system is:
+## 1. The shape of the system
 
 ```
-  flags / wizard answers
-          │
-          ▼
-  install.sh ── resolves every setting once ──┐
-          │                                   │
-          ├── fetch pinned upstreams          │  memos in ~/.config/aura-glass
-          ├── copy css/ into $CONF_DIR        │  so the next flagless run
-          ├── rewrite the copies (tint,       │  resolves to the same answers
-          │   opacity, radii) in place        │
-          ├── splice them into 4 generated ───┘
-          │   CSS files via aura-glass-apply
-          ├── load dconf/*.ini
-          ├── apply_* dconf keys per flag
-          └── gsettings for accent/theme/icons/cursor/font
+ front ends                      the one resolver                         what it writes
+ ──────────                      ────────────────                         ──────────────
+ ./install.sh FLAGS ─┐
+ setup wizard (GTK)  ├─ flags ─▶ install.sh ─ parse_flags ─ resolve ─┬─▶ ~/.config/aura-glass/   memos, mode drawers,
+ text wizard         │           (+ lib/*.sh, tokens/tokens.sh)      │                          installed CSS copies, backups/
+ settings app ───────┤                                               ├─▶ dconf  /org/gnome/shell/extensions/…
+ adaptive worker ────┤  (--settings-only [--incremental] …)          ├─▶ gsettings (accent, themes, icons, cursor, font…)
+ aura-glass-preview ─┘  (calls the same apply_* with PREVIEW_MODE=1) └─▶ bin/aura-glass-apply ─▶ 4 generated CSS targets
+                                                                          (~/.themes/Aura-Glass/gnome-shell/gnome-shell.css,
+ window menu "Blur This App" ─▶ aura-glass-operation app-blur ─▶           ~/.config/gtk-4.0/gtk.css + gtk-dark.css,
+     aura-glass-preview app-blur ─▶ apply_app_blur                         ~/.config/gtk-3.0/gtk.css)
 ```
 
-Three properties fall out of that and everything else defends them:
+All project-owned writers run under one lock (`aura-glass-operation`, §10).
+Nothing but `install.sh` and the `apply_*` functions in `lib/` decides what a
+flag means. Every other program composes flags or calls those functions.
 
-1. **Reversible.** The installer only ever *appends inside a marked block* to a
-   generated file, and takes a first-run copy (`backup_once`) of anything it
-   overwrites. `uninstall.sh` puts back the copy or strips the block.
-2. **Rootless.** Everything is under `$HOME`. The three exceptions
-   (dependencies, `gnome-rounded-blur`, GDM) are opt-in and clearly announced.
-3. **Idempotent.** Re-running replaces a block rather than stacking one, and
-   `--dry-run` proves what a run would do without doing it.
+### Two kinds of run
+
+| Run | Command | What it does | Needs |
+|---|---|---|---|
+| **Full install** | `./install.sh [flags]` | deps → base theme → extensions → rounded-blur → icons → cursors → fonts → dconf preset → CSS → gsettings → extensions on/off → integrations (icon sync, GUI, update timer, Flatpak override, panel-blur unit, adaptive worker) → enable extensions → GDM (opt-in) → `finish` (log out) | network; root only for deps, rounded-blur fallback, GDM |
+| **Retune** | `./install.sh --settings-only [flags]` | optional pack/font install if those flags were given → dconf preset → CSS → gsettings → icon sync → extensions on/off → remember mode → GUI, update timer, panel-blur unit, adaptive worker → GDM sync (if installed) | nothing. Offline, unprivileged, a few seconds |
+
+`--settings-only` refuses to run unless `$CONF_DIR` and the theme directory
+exist.
+
+Three modifiers narrow a retune further. All three are internal protocols used
+by the GUI and the adaptive worker:
+
+| Modifier | Contract |
+|---|---|
+| `--incremental` | Classify the typed flags (`lib/steps-apply-plan.sh`) and run **only** the matching steps: `accent`, `cursor-theme`, `cursor-size`, `window-buttons`, `window-brightness`, `app-blur`, `css`, `adaptive-blur`. Any other flag, a missing or changed source fingerprint, or no narrow flag at all falls back to the full retune. |
+| `--plan-json` | With `--settings-only --incremental --dry-run`, print `{"schema_version":1,"actions":[…],"fallback_reason":…}` on stdout and exit. It was built for an "explain Apply" view in the settings window, but that view isn't wired up yet. Today only `tools/check-incremental-apply.py` calls it. |
+| `--adaptive-blur active\|restore` | Private to the adaptive worker. Requires `--settings-only --incremental`. Applies or removes a **transient** no-blur state without writing any memo (`remembering()` is false while it's set). |
+
+`--deps-only` installs missing dependencies and exits. The settings window
+hands it to a terminal because it needs `sudo`.
 
 ---
 
-## 2. Precedence: how a setting gets its value
+## 2. Resolution: how a setting gets its value
 
-This is the single most important mechanism in the project.
-
-```
-  a flag typed on the command line          (highest)
-    ↓
-  --glass-mode, for the sub-flags a mode owns
-    ↓
-  the current mode's drawer:  $CONF_DIR/modes/<mode>/<key>
-    ↓
-  the shared memo:            $CONF_DIR/<key>
-    ↓
-  the shipped default         (lowest)
-```
-
-Implemented in exactly two places, both in `install.sh`'s flow:
-
-- the **resolution block** in `install.sh` (roughly the second half of the
-  file), which reads memos into shell variables, validates them, and dies on a
-  bad value *before* anything has been written; and
-- the `apply_*` functions in [`lib/steps-dconf.sh`](../lib/steps-dconf.sh) and
-  [`lib/steps-css.sh`](../lib/steps-css.sh), each of which writes its memo back
-  as its last step.
-
-Every flag has a twin `*_EXPLICIT` variable set by the parser. `_EXPLICIT` means
-"the user typed this, do not overrule it". `lib/steps-modes.sh` reuses the same
-marker to mean "settled for this run" once a mode's drawer has supplied a value,
-so a later reader does not fall back past it.
-
-Memo writes are guarded by `remembering()` in `lib/common.sh`, which is false
-under `--dry-run` and under `PREVIEW_MODE=1`. That is what lets
-`bin/aura-glass-preview` call the real `apply_*` functions on every slider tick
-without ever changing what the next real run resolves to.
-
-### Why the GUI does not resolve anything
-
-`gui/aura_glass_settings.py` sends only the flags that **changed** and lets the
-installer resolve the rest:
+This is the mechanism everything else defends.
 
 ```
-install.sh --settings-only --yes <only the flags that changed>
+  a flag typed on the command line                 highest
+    ↓
+  --glass-mode, for the sub-flags a mode owns      (apply_glass_mode)
+    ↓
+  the mode's drawer   $CONF_DIR/modes/<mode>/<key> (load_glass_mode_memos)
+    ↓
+  the top-level memo  $CONF_DIR/<key>              (resolution block in install.sh, or read inside apply_*)
+    ↓
+  the shipped default                              lowest
 ```
 
-A window with its own copy of the precedence chain would drift from the
-installer within one release. The two places the window *must* duplicate
-knowledge — the radius preset rows and the per-surface bounds, because spin rows
-need their ranges before `install.sh` runs — are covered by
-`tools/check-gui-radius.py`.
+- **Parsing.** `parse_flags` in `install.sh` is a function, not a loop, because
+  it runs twice: once over argv and once over whatever the setup wizard printed.
+  Every flag sets its variable and usually an `*_EXPLICIT` twin. `_EXPLICIT`
+  means "the user typed this, nothing may overrule it". `TYPED_FLAGS` records
+  the raw argv for the incremental classifier.
+- **Validation happens before anything is written.** The resolution block
+  (`install.sh`, after `parse_flags`) reads memos, normalises
+  (transparency → two-decimal fraction, clamped to 0.70–1.00), and `die`s on a
+  bad accent, preset, pack, font, cursor size, button style or radius list.
+- **Memos are written by the consumer.** Each `apply_*` / `install_*` writes its
+  memo as its last step, guarded by `remembering()` (`lib/common.sh`).
+  `remembering()` is false under `--dry-run`, under `PREVIEW_MODE=1` (live
+  preview) and while `ADAPTIVE_BLUR` is set (transient adaptive state). That's
+  what lets the preview and the adaptive worker call the real functions without
+  changing what the next run resolves to.
+- **Some keys resolve at the point of use** rather than in the block:
+  `--window-buttons`, `--cursor-size` and `--titlebar-button-style` read their
+  memo inside their `apply_*`, so a run that dies early never records a value it
+  didn't apply.
+
+### Why front ends never resolve
+
+The settings window sends **only the flags that changed**
+(`Settings.flags_against`) and lets `install.sh` resolve the rest from memos.
+The setup wizard sends a full flag list, but it only runs before an install.
+Neither contains a copy of the precedence chain. Where a front end *must* know a
+value before `install.sh` runs (radius bounds, preset rows), the duplicate has a
+checker. See [CONSISTENCY.md](CONSISTENCY.md).
 
 ---
 
-## 3. The CSS pipeline
+## 3. Glass modes
+
+A mode is **not a new kind of setting**. It names a combination of flags
+`install.sh` already has, and it owns a drawer that keeps that combination's own
+tuning. `lib/steps-modes.sh` resolves a mode into flags and steps aside.
+
+| Mode | `WANT_BLUR` | window / popup / notification blur | transparency seed | sheets |
+|---|---|---|---|---|
+| `frosted` (default) | 1 | on / on / on (each overridable) | the top-level memo, else **0**, so windows come out opaque (KI-18). The flagless resolver default is 0.90 | `shell-popup-blur`, `shell-notification-blur`, `gtk4-transparency` |
+| `performance` | 0 | off / off / off | `1.00` (opaque) | `shell-80-solid` (opaque ladder); `gtk4-transparency` only if the level is below 1.00 |
+
+- `VALID_GLASS_MODES="frosted performance"`. `resolve_glass_mode` takes
+  `--glass-mode`, then infers it from typed flags (`--blur`/`--window-blur` →
+  frosted, `--no-blur` → performance), then reads `$CONF_DIR/glass-mode`.
+  Anything else, including the legacy names `solid` and `transparent`, leaves
+  `GLASS_MODE` empty, and `remember_glass_mode` then records `frosted`.
+- **Drawers** (`$CONF_DIR/modes/<mode>/`) hold `app-transparency`,
+  `app-tint-color`, `shell-tint-color`, `app-blur-scope`, `popup-blur`,
+  `notification-blur`, `blur-strength`, `popup-brightness`, `window-brightness`
+  and `notification-opacity`.
+  - `seed_glass_mode` creates a drawer on first entry. Frosted seeds from the
+    top-level memos; performance seeds opaque black.
+  - `load_glass_mode_memos` copies the drawer into this run's variables where no
+    flag was given.
+  - `save_glass_mode_memos` writes this run's answers back. It's called from
+    `remember_glass_mode`, which runs at the end of full runs and full retunes
+    **but not on the narrow `--incremental` path** (see
+    [KNOWN-ISSUES.md](KNOWN-ISSUES.md) KI-01).
+- `--no-blur` **is** performance mode now. It also loads `dconf/solid.ini` on
+  top of `core.ini`, but only when the preset itself is (re)loaded (§7).
+
+### Legacy: `solid` and `transparent`
+
+Older versions had three modes. `solid` stood the whole theme down: it wrote
+`$CONF_DIR/styling-off`, reset gtk-theme and the shell theme, and disabled the
+project's extensions (`stand_down_extensions`, recorded in
+`modes/solid/disabled-extensions`). That machinery is still in the tree and
+still covered by checks (`check-solid-extensions.sh`, `check-styling-off.sh`),
+but **no current flag reaches it**: both current modes set `WANT_STYLING=1`.
+What runs today is the way *back*. On an old install, `restore_extensions`
+re-enables whatever solid had stood down, and `sync_styling_marker` removes the
+marker. Keep or retire this deliberately. Don't let it rot halfway.
+
+---
+
+## 4. Adaptive performance (an overlay, not a mode)
+
+```
+top-bar menu (Aura Glass Helper)          aura-glass-adaptive.service (user)
+  Auto / Full Glass / Performance             loop every 2 s (AURA_GLASS_ADAPTIVE_INTERVAL)
+        │ aura-glass-adaptive profile X           │ battery? GPU ≥80% ×3 (clears <65%)? listed game fullscreen+focused?
+        ▼                                         ▼
+  $CONF_DIR/adaptive-profile  ◀── tools/aura_glass_adaptive.py (AdaptiveReducer: hysteresis, debounce)
+                                          │ on a state change only
+                                          ▼
+   aura-glass-operation run -- install.sh --settings-only --incremental --adaptive-blur active|restore --yes
+                                          ▼
+                    apply_adaptive_blur (lib/steps-dconf.sh)
+```
+
+- **active.** Saves the current per-component Blur My Shell `blur` keys to
+  `adaptive-performance/saved-bms-blur`. Turns every pipeline off *without*
+  disabling the extension, because disabling BMS on GNOME 51 segfaults Mutter.
+  Swaps in the opaque `shell-80-solid` ladder and the performance drawer's tints
+  and level, then re-splices with `aura-glass-apply --no-shell-reload`.
+- **restore.** Writes the saved keys back and re-applies the **normal mode's
+  drawer** (blur scope, strength, brightness, tints, notification ground,
+  popup/notification sheets).
+- It's transient: `remembering()` is false, so no top-level memo or drawer
+  changes. State lives in `adaptive-performance/{active,reason}`.
+- The service is enabled only while `WANT_BLUR=1`, i.e. in Frosted. In
+  Performance it's disabled and `reason` is set to `no-blur`. The top-bar menu
+  still works in Performance and calls the worker directly (KI-02).
+
+---
+
+## 5. The CSS pipeline
 
 ### Cascade by filename
 
-`css/` holds numbered sheets. **The numeric prefix is the cascade order**, not
-decoration: several sheets are meant to beat the one before them on equal
-specificity (the dropdown radius over the button radius, the accent slider fill
-over the white one, the second `.quick-settings .icon-button` block over the
-first).
+`css/` holds numbered sheets. **The numeric prefix is the cascade order.** Later
+sheets are meant to win at equal specificity.
 
 ```
-shell-00-flat        shell-10-quick-settings   shell-20-popup-menus
-shell-30-notifications  shell-40-quick-toggles  shell-50-dialogs
-shell-80-solid       (only when --no-blur)
-shell-90-density     (generated per display, see below)
-shell-popup-blur     shell-notification-blur   (optional, by flag)
-
-gtk4-00-flat  gtk4-10-fields  gtk4-20-buttons  gtk4-30-dropdowns
-gtk4-40-containers  gtk4-50-window-controls  gtk4-60-controls
-gtk4-70-surfaces    gtk4-transparency
-gtk4-window-controls-{adwaita,material,flat}   (one, by --titlebar-button-style)
-
-gtk3-tweaks   gtk3-window-controls-{adwaita,material,flat}
+shell:  00-flat → 10-quick-settings → 20-popup-menus → 30-notifications → 40-quick-toggles
+        → 50-dialogs → 80-solid* → 90-density (generated) → popup-blur* → notification-blur*
+gtk4:   00-flat → 10-fields → 20-buttons → 30-dropdowns → 40-containers → 50-window-controls
+        → 60-controls → 70-surfaces → transparency* → window-controls-{adwaita|material|flat}*
+gtk3:   gtk3-tweaks → gtk3-window-controls-{adwaita|material|flat}*
+                                                         (* optional: installed or deleted by a flag)
 ```
 
-Three places decide a sheet's fate and only one of them is a glob, which is why
+Three places decide a sheet's fate, and only one is a glob. That's why
 `tools/check-cascade.sh` exists:
 
 | Place | Role |
 |---|---|
-| `install_css` (`lib/steps-css.sh`) | copies `css/` into `$CONF_DIR`; optional sheets get an explicit install-or-remove branch |
-| `SHELL_SNIPPETS` / `GTK4_SNIPPETS` (`bin/aura-glass-apply`) | the ordered concatenation list |
-| `tools/preview-session.sh` | the preview harness's own copy of the same set |
+| `install_css` (`lib/steps-css.sh`) | Copies `css/` into `$CONF_DIR` (glob for numbered sheets, explicit branches for optional ones). |
+| `SHELL_SNIPPETS` / `GTK4_SNIPPETS` (`bin/aura-glass-apply`) | The ordered concatenation list. |
+| `tools/preview-session.sh` | The headless preview harness's copy. |
 
-An optional sheet is **installed or deleted** by `install_css`, never switched
-on at read time — `aura-glass-apply` concatenates whatever it finds and has no
-way to know which flags this install was given.
+An optional sheet is **installed or deleted**, never switched on at read time.
+`aura-glass-apply` concatenates whatever it finds and can't know your flags.
 
-### Rewriting the installed copies
+### Rewriting installed copies (never `css/`)
 
-Four rewriters edit the copies in `$CONF_DIR`, never `css/` in the repo. The
-repository stays at the shipped `default` state so `check-tokens.sh` always has
-one known baseline to check.
+`install_css` copies fresh sheets every run, then rewrites the copies. `css/`
+stays at the shipped `default` state so `check-tokens.sh` has one baseline.
 
-| Rewriter | Owns |
-|---|---|
-| `tools/rescale-transparency.py` | every alpha in `gtk4-transparency.css`, rescaled relative to `TOKEN_APP_TRANSPARENCY_SHIPPED` |
-| `tools/apply-tint-color.py` | the colour translucent GTK grounds are mixed toward |
-| `tools/apply-shell-tint.py` | the hue of the shell's dark surfaces, keeping each one's lightness |
-| `tools/apply-notification-opacity.py` | the alpha of the notification ground ladder (rest / hover / pressed) |
-| `tools/apply-radius-preset.py` | the eight radii across every installed sheet |
+| Step (`lib/steps-css.sh` unless noted) | Runtime helper | Owns |
+|---|---|---|
+| `install_transparency_css` | `tools/rescale-transparency.py` | every alpha in `gtk4-transparency.css`, rescaled from `TOKEN_APP_TRANSPARENCY_SHIPPED` (0.92) |
+| `apply_app_tint_color` | `tools/apply-tint-color.py` | the colour translucent GTK grounds mix toward |
+| `apply_shell_tint_color` | `tools/apply-shell-tint.py` | the hue of shell surfaces (lightness kept) |
+| `apply_popup_transparency` | inline Python | popup and solid-sheet alphas scaled by the window level |
+| `apply_notification_opacity` | `tools/apply-notification-opacity.py` | the alpha of the notification ground ladder |
+| `apply_radius_css` | `tools/apply-radius-preset.py` (+ `tools/token_manifest.py`) | the eight radii across every installed sheet |
+| `apply_popup_brightness` (`lib/steps-dconf.sh`) | `tools/apply-popup-brightness.py` | both places Blur My Shell keeps a popup brightness |
 
-The tint rewriter owns a literal's *colour channels* and the opacity rewriter
-owns its *alpha*, so the two are order-independent and neither undoes the other.
-
-`shell-90-density.css` is generated, not shipped: `measure_logical_ppi` +
-`density_css` scale panel icon sizes for whatever screen the installer actually
-ran on. It gets prefix 90 so it lands after every hand-written shell sheet, and
-its own file so a re-run cannot silently double an appended block.
+The tint rewriters own a literal's colour channels and the opacity rewriters own
+its alpha, so they're order-independent. `shell-90-density.css` is generated per
+display by `measure_logical_ppi` and `density_css`.
 
 ### Splicing: `bin/aura-glass-apply`
 
-Four targets, all generated by upstream installers:
-
-```
-~/.themes/<THEME>/gnome-shell/gnome-shell.css   flattened
-~/.config/gtk-4.0/gtk.css                        flattened
-~/.config/gtk-4.0/gtk-dark.css                   flattened
-~/.config/gtk-3.0/gtk.css                        not flattened (user's own file)
-```
-
-Each gets exactly one block:
-
-```
-/* >>> aura-glass BEGIN <<< */ … /* >>> aura-glass END <<< */
-```
-
-Re-running strips the old block first, so blocks never stack. Legacy marker
-names (`tahoe-glass`, `tahoe-tweaks`) are stripped too.
-
-**Flattening** rewrites the theme's own `box-shadow`, `background-image:
-…-gradient(…)` and text-shadow values to `none` *where they are declared*,
-rather than trying to out-rank them. The earlier approach appended counter-rules
-and had to win a cascade fight against a sheet marking 37 of its own shadows
-`!important` — unwinnable with a blanket reset, because between two `!important`
-declarations specificity still decides. Setting the value at its declaration
-leaves no rule to lose to. A gradient is replaced by the mean of its colour
-stops; a stop the parser cannot read aborts that replacement rather than
-inventing a colour.
-
-**Accent substitution** rewrites the theme's hard-coded blues
-(`#0091ff #3584e4 #3484e2 #1c6bc7 #619fe8`) to `-st-accent-color` on the shell
-side and `@accent_bg_color` on the GTK4 side, per line, so GNOME's own accent
-machinery drives the whole desktop live. One `@define-color` is skipped: the one
-defining the very name being substituted in, which would otherwise become a
-definition naming itself.
-
-Finally the User Themes key is toggled off and back on, because that extension
-reloads on a settings change rather than a file change.
+- Four targets: the theme's `gnome-shell.css` and GTK4 `gtk.css`/`gtk-dark.css`
+  are *flattened*; GTK3's `gtk.css` (the user's own file) is not. Each gets
+  exactly one `/* >>> aura-glass BEGIN <<< */ … END` block. Legacy
+  `tahoe-glass`/`tahoe-tweaks` blocks are stripped.
+- **Flattening** rewrites the theme's own `box-shadow`, gradient and
+  `text-shadow` values to `none` *where they're declared*, rather than fighting
+  `!important` rules from outside.
+- **Accent substitution** rewrites the theme's hard-coded blues to
+  `-st-accent-color` in the shell and `@accent_bg_color` in GTK4, so GNOME's
+  accent recolours everything live.
+- **Publishing** goes through a temp file and `os.replace`, and identical output
+  isn't rewritten (quiet apply). The shell reload (toggling User Themes) happens
+  only when the shell CSS changed. `--force-reload` forces it,
+  `--no-shell-reload` suppresses it, and `--json` prints a machine-readable
+  result.
+- If `$CONF_DIR/styling-off` exists (legacy solid), it stands the targets down
+  instead: restore `.orig`, move a `.absent` file aside as `.stood-down`, or
+  strip the block.
 
 ---
 
-## 4. Tokens
+## 6. Tokens and radius presets
 
-[`tokens/tokens.sh`](../tokens/tokens.sh) is sourced, not templated. GTK4's
-`var()` fails at computed-value time rather than parse time, St has no custom
-properties at all, and GTK3's engine predates them — there is no cross-toolkit
-way to express a shared number as a variable. Generating the CSS from templates
-was considered and rejected, because the per-value comments explaining *why* a
-number is that number are the most valuable content in the repo and templating
-would strip them from the files people read.
+`tokens/tokens.sh` is **sourced, not templated**. GTK4 `var()` fails at
+computed-value time, St has no custom properties, and GTK3 predates them, so a
+shared number has to be written literally in each file. The duplication is made
+**checked** instead:
 
-So values stay literal in the files that use them, and the duplication is made
-**checked** instead of trusted:
+- each token's comment names every consumer,
+- `tools/token_manifest.py` is that list in machine-readable form (and the
+  radius writer uses it too),
+- `tools/check-tokens.sh` fails, naming the exact file and line.
 
-- each token's comment lists every consumer file and selector/key;
-- `tools/token_manifest.py` is that pairing list in machine-readable form;
-- `tools/check-tokens.sh` fails naming the exact file and line that disagrees.
+The tokens are eight radii (`TOKEN_RADIUS_{WINDOW,MENU,QUICK_SETTINGS,NOTIFICATION,DIALOG,POPUP,OSD,BUTTON}`),
+six Blur My Shell sigmas and two transparency values. Radius presets are
+`flat sharp adwaita soft medium default rounded` plus `custom` (eight values,
+bounded per surface by `radius_bounds`). `pill` is a retired name that
+`radius_preset_canonical` maps to `rounded`.
 
-Tokens held: eight radii (`TOKEN_RADIUS_*`), six Blur My Shell sigmas
-(`TOKEN_SIGMA_*`), and two transparency values
-(`TOKEN_APP_TRANSPARENCY_SHIPPED`, `TOKEN_APP_TINT`).
-
-Deliberately *not* tokens: the accent colour (already live-plumbed through
-GNOME's own machinery) and any value with a single consumer (a token there
-cannot catch drift and only adds a place to forget).
-
-### Radius presets
-
-Seven curated rows — `flat sharp adwaita soft medium default rounded` — plus
-`custom`. Curated rather than a multiplier, because the eight numbers are not
-proportional to each other: Quick Settings is *larger* than a menu (Blur My
-Shell groups the date menu with it), and the OSD ceiling is set by the height of
-the box being blurred rather than by the shape drawn inside it. Past half that
-height the four corner arcs overlap and the pill becomes an ellipse.
-
-The project rule, stated in the sheets themselves: **a painted radius must equal
-the blur radius behind it.** Blur My Shell rounds the blur actor; the CSS rounds
-the surface on top. Disagreement leaves a sliver of the larger shape showing,
-which reads as a rendering fault. This is why `apply_radius_css` and
-`apply_radius_dconf` always move together.
-
-`radius_preset_canonical()` is the one place a retired name maps to its
-replacement (`pill` → `rounded`), and it is what the memo is written at, so no
-downstream reader has to know a name that no longer names a row.
-
----
-
-## 5. The three glass modes
-
-A mode is **not a fourth kind of setting**. It is a name for a combination of
-flags `install.sh` already had, plus a drawer to keep that combination's own
-tuning in. `lib/steps-modes.sh` resolves a mode into those flags and then gets
-out of the way — nothing downstream knows a mode exists.
-
-| Mode | Window blur | Popup blur | Window transparency | Styling |
-|---|---|---|---|---|
-| `frosted` (default) | on | on | as tuned | on |
-| `transparent` | off | on | on, seeded at 0.82 | on |
-| `solid` | — | — | — | **off** |
-
-- `frosted` is the full look.
-- `transparent` shows the wallpaper straight through the window. Because there
-  is no blurred layer under the text it seeds *darker* (0.82) rather than
-  inheriting frosted's level. Tint colours *are* inherited — a colour preference
-  travels with the user; an opacity level is coupled to whether there is blur
-  behind the glass, which is exactly what changes between modes.
-- `solid` stands the theme down: stylesheets come back out, shell and GTK themes
-  return to GNOME's stock ones, and this project's extensions are switched off
-  **with their own settings intact**. Icons, cursors and accent stay — those are
-  the user's preferences, not this theme's styling. Nothing is uninstalled.
-
-Because `solid` removes the styling itself, it *refuses* flags that would have
-nothing to act on (`--blur`, `--popup-blur`, `--notification-blur`,
-`--window-blur`, a non-zero `--app-transparency`) rather than discarding them
-silently.
-
-**Per-mode drawers** live at `$CONF_DIR/modes/<mode>/<key>`, holding
-`app-transparency`, `app-tint-color`, `shell-tint-color`, `blur-strength`,
-`popup-brightness`, `notification-opacity`, `popup-blur`, `notification-blur`
-and (frosted only) `app-blur-scope`. `seed_glass_mode` creates a drawer on first
-entry, `load_glass_mode_memos` reads it into this run's variables where no flag
-was given, `save_glass_mode_memos` writes this run's answers back.
-
-Two markers record state: `$CONF_DIR/glass-mode` (the remembered name) and
-`$CONF_DIR/styling-off` (the honest, on-disk fact that the theme is down —
-it outranks a memo that a hand-edited install could have left disagreeing).
-
-`--no-blur` is **not** `solid`. `--no-blur` is an opaque but fully themed
-desktop: every radius, spacing, accent, monochrome control and capsule slider
-survives, and only Blur My Shell's shaders go. `dconf/solid.ini` is what it
-loads on top of `core.ini`. `solid` is a desktop with the theme taken off it.
-
-Design table and rationale: [superpowers/specs/2026-08-18-glass-modes-design.md](superpowers/specs/2026-08-18-glass-modes-design.md).
-
----
-
-## 6. Extensions
-
-Three tiers, all catalogued in `lib/steps.sh`:
-
-- **core** — `user-theme@…` from the extensions site, plus two built from a
-  pinned commit: `blur-my-shell@aunetx`,
-  `custom-osd@neuromorph`.
-- **recommended** (`EXT_EXTRA_RECOMMENDED`) — six.
-- **full** (`EXT_EXTRA_ALL`) — fourteen.
-- `EXT_NO_AUTO_ENABLE` — catalogued and installable but never switched on by a
-  pack (currently `auto-accent-colour@Wartybix`, which would overwrite the
-  accent the wizard just asked for).
-
-Upstreams are **pinned by commit**. Both Blur My Shell and the base theme move
-regularly, and a theme that changes under the CSS tweaks is exactly how you get
-a half-applied look with no error message.
-
-Three patches are applied on top of the Blur My Shell pin, in order:
-
-| Patch | Why |
-|---|---|
-| `blur-my-shell-overview.patch` | `blur-on-overview: false` upstream only stops forcing window actors visible; it does not remove blur from overview previews |
-| `blur-my-shell-subwindows.patch` | upstream's `check_blur` matched one frame-type set excluding `ATTACHED` and `UTILITY`, leaving a blurred app's dialogs and tool palettes unblurred |
-| `blur-my-shell-notifications.patch` | splits notification banners and history cards onto their own `notification` key, gated independently of menus and dialogs |
-
-`patches/custom-osd-gnome50.patch` carries
-Custom OSD to GNOME 50 and 51.
-
-`bin/aura-glass-ext` is the catalogue reachable one UUID at a time
-(`list | install | remove | enable | disable | recommended | full`). The settings
-window builds its Extensions page from `aura-glass-ext list` rather than keeping
-a second Python copy of the arrays — `tools/check-ext-catalogue.sh` asserts the
-command describes everything the install path can reach.
-
-### The first-party extension
-
-`extensions/aura-glass-blur@aura-glass.local` does three things:
-
-1. Adds **Blur This App** to the window right-click menu, by monkeypatching
-   `WindowMenu._buildMenu`. It reads and writes Blur My Shell's own
-   `applications` keys (`blur`, `enable-all`, `whitelist`, `blacklist`) and
-   **mirrors the change into the same `$CONF_DIR` memos** `install.sh` reads
-   back — without that mirror a toggle would hold only until the next install.
-   It adds nothing at all when Blur My Shell's schema is absent or its per-app
-   blur is off.
-2. Exports `io.github.DevWebeloper.AuraGlass` on D-Bus (`ListWindows`,
-   `WindowsChanged`, `GetFocusState`, `GetFullscreen`, `FocusChanged`),
-   which is the only way an unprivileged GTK app on Wayland can know what windows
-   exist and whether the active window is fullscreen — used by the settings
-   window's "Open now" list and the adaptive service.
-3. Provides the **Adaptive Performance Mode** top-bar quick profile menu
-   (**Auto**, **Full Glass**, **Performance**). It updates its status icon and
-   reason live, invokes `aura-glass-adaptive profile` asynchronously, and stays
-   active even across Solid mode so users can restore glass anytime from the panel.
-
-### The adaptive performance service
-
-`bin/aura-glass-adaptive` and `systemd/aura-glass-adaptive.service` provide
-dynamic performance management:
-
-- Persists selected profile in `$CONF_DIR/adaptive-profile` (`auto` by default).
-- Persists selected fullscreen games in `$CONF_DIR/adaptive-fullscreen-apps`.
-- In `auto` profile, triggers Performance mode on battery discharge (`Discharging`),
-  sustained GPU load (≥80% for three 2-second samples, clearing below 65%), or
-  when a configured game is focused and fullscreen.
-- Transient transitions run `install.sh --settings-only --incremental --adaptive-blur active|restore`
-  under the writer operation lock, ensuring all blur surfaces (app windows, popups,
-  notifications, CSS) transition cleanly while leaving normal saved memos completely
-  immutable.
+**Project rule:** a painted radius must equal the blur radius behind it, so
+`apply_radius_css` (paint) and `apply_radius_dconf` + `apply_pipeline_radius`
+(blur) always move together.
 
 ---
 
 ## 7. dconf and gsettings
 
-`dconf/core.ini` is **core extension settings** as one preset:
-Blur My Shell pipelines and sigmas, custom-osd,
-and the rest. `dconf/extras.ini` covers the optional extensions.
-`dconf/solid.ini` is loaded on top of core by `--no-blur`.
+`load_dconf` (`lib/steps-dconf.sh`):
 
-`load_dconf` loads the preset; the `apply_*` functions in `lib/steps-dconf.sh`
-then overwrite individual keys from this run's resolved flags:
+1. Loads `dconf/core.ini` into `/org/gnome/shell/extensions/`. Then
+   `dconf/solid.ini` on top when `WANT_BLUR=0`, and `dconf/extras.ini` when
+   extras are wanted.
+   **On an existing install the preset is not reloaded.** If a `repo-path` or
+   `accent` memo exists and Blur My Shell already has `pipelines`, it skips the
+   load to preserve the user's extension settings, unless `--force` is given.
+   That's why a mode switch on an existing install never reloads `solid.ini`
+   (KI-03).
+2. Then always overlays the resolved flags: `apply_grain`, `apply_blur_strength`,
+   `apply_popup_brightness`, `apply_window_brightness`, `apply_popup_blur`,
+   `apply_notification_blur`, `apply_app_blur`, `apply_app_opacity`,
+   `apply_radius_dconf` (+ `apply_pipeline_radius`), `sync_osd_profile` and
+   `refresh_bms_after_dconf`. The last one is skipped on GNOME ≥ 51, where
+   toggling BMS crashes Mutter.
 
-```
-apply_radius_dconf        eight radii into Blur My Shell's corner-radius keys
-apply_pipeline_radius     the blur pipelines' own rounding
-apply_app_opacity         window opacity + the Blur My Shell applications sigma
-apply_app_blur            whitelist/blacklist/enable-all, built by app_blur_literal
-apply_popup_blur          the popup component, static vs dynamic
-apply_notification_blur   the split-out notification key from the patch
-apply_popup_brightness    both places Blur My Shell keeps a brightness
-apply_blur_strength       scales every sigma together, 25–200%
-apply_grain               noise overlay
-apply_window_buttons      org.gnome.desktop.wm.preferences button-layout
-apply_cursor_size         org.gnome.desktop.interface cursor-size
-apply_font                interface / document / titlebar font at existing sizes
-apply_gsettings           color-scheme, accent-color, gtk-theme, icon-theme, cursor-theme
-sync_osd_profile          keeps custom-osd in step with the rest
-```
+`apply_gsettings` writes `color-scheme=prefer-dark`, the accent,
+gtk-theme/shell theme, icon theme, cursor theme/size, window buttons and font.
+It also sets `org.gnome.shell disable-extension-version-validation=true`.
 
-`app_blur_literal` is the one place arbitrary user text reaches dconf — the
-per-app patterns someone typed into the settings window. It builds a GVariant
-array literal, and `tools/check-app-blur-lists.sh` round-trips the result
-through GLib's own parser without touching live dconf.
-
-**Solid mode never calls `load_dconf`.** Loading `core.ini` is exactly the
-"modifying the extension" that standing down is supposed to avoid; the
-extensions are disabled with their settings untouched, ready for the way back.
-The list of what was disabled is recorded at
-`$CONF_DIR/modes/solid/disabled-extensions`.
+`app_blur_literal` is the one place arbitrary user text (per-app wm_class
+patterns) reaches dconf. `check-app-blur-lists.sh` round-trips it through
+GLib's parser.
 
 ---
 
-## 8. Systemd user units
+## 8. Extensions
 
-| Unit | Why |
+Catalogued in `lib/steps.sh`:
+
+| Tier | Contents |
 |---|---|
-| `aura-glass-icon-sync.service` | GNOME's `icon-theme` key holds one name with no light/dark notion; Colloid ships `-Light`/`-Dark` per accent. This follows the system preference. |
-| `aura-glass-panel-blur.service` | Blur My Shell clips its panel background actor to panel geometry, which is not settled at login and is in flux on every monitor change. Rebuilds the blur once the desktop settles. Enabled by default only on multi-monitor machines. |
-| `aura-glass-gdm-sync.service` | Pushes the desktop wallpaper and primary monitor to the login screen. |
-| `aura-glass-update-check.{service,timer}` | One `git ls-remote` a day. Notifies once **per release**, not once per day. Never installs anything — that is a button in the window. |
+| core | `user-theme@…` (from EGO), plus `blur-my-shell@aunetx` and `custom-osd@neuromorph` built from pinned commits, plus the first-party `aura-glass-blur@aura-glass.local` |
+| `EXT_EXTRA_RECOMMENDED` (6) | AppIndicator, Tiling Assistant, Quick Settings Audio Panel, Hot Edge, Kiwi Menu, Copyous |
+| `EXT_EXTRA_ALL` (8) | the six plus Vitals and Restart To |
+| `EXT_NO_AUTO_ENABLE` | empty right now |
+
+- Upstreams are **pinned by commit** (table in §12). A theme that changes under
+  the CSS gives a half-applied look with no error.
+- Blur My Shell patches, applied in order: `blur-my-shell-overview.patch`,
+  `blur-my-shell-subwindows.patch`, `blur-my-shell-notifications.patch` (adds the
+  separate `popup/notification` key). Custom OSD gets
+  `custom-osd-gnome50.patch`. Copyous gets `copyous-gnome51.patch`.
+- `bin/aura-glass-ext` exposes the catalogue one UUID at a time
+  (`list | install | remove | enable | disable | recommended | full`). The
+  settings window's Extensions page is built from `aura-glass-ext list`.
+
+### The first-party extension: `extensions/aura-glass-blur@aura-glass.local`
+
+"Aura Glass Helper" for shell versions 48–51:
+
+1. **Blur This App** in the window menu. It runs
+   `aura-glass-operation app-blur --wm-class X --enabled 0|1`, which goes
+   through the writer lock to `aura-glass-preview app-blur` and
+   `apply_app_blur`, so the memo and dconf change together.
+2. A **D-Bus bridge**, `io.github.DevWebeloper.AuraGlass` at
+   `/io/github/DevWebeloper/AuraGlass`. Methods are `ListWindows`,
+   `GetFocusState`, `GetFullscreen`, `SetWindowOpacity`, `RefreshOpacity` and
+   `InspectOverviewState`; signals are `WindowsChanged` and `FocusChanged`.
+   Unprivileged GTK apps on Wayland have no other way to see the window list
+   and the fullscreen state. Both the settings app and the adaptive worker use
+   it.
+3. The **adaptive profile menu** (Auto / Full Glass / Performance), which calls
+   `aura-glass-adaptive profile <p>`.
 
 ---
 
-## 9. The GUI layer
+## 9. User services (`systemd/`, installed to `~/.config/systemd/user/`)
 
-Two separate windows, both optional, both pure front ends for flags.
+| Unit | Runs | Why |
+|---|---|---|
+| `aura-glass-icon-sync.service` | `aura-glass-icon-sync` | Icon packs ship `-Light`/`-Dark` variants and GNOME's key holds one name. This follows the light/dark preference. |
+| `aura-glass-panel-blur.service` | `aura-glass-panel-blur` → `aura_glass_panel_blur.py` | Rebuilds BMS panel blur after monitor layout changes. Default on only for multi-monitor setups. |
+| `aura-glass-gdm-sync.service` | `aura-glass-gdm-sync` | Pushes the wallpaper and primary monitor to GDM. Present only if GDM was themed or synced. |
+| `aura-glass-update-check.{service,timer}` | `aura-glass-update-check --notify` | Runs `git ls-remote` daily. Notifies once per release and never installs. |
+| `aura-glass-adaptive.service` | `aura-glass-adaptive` → `aura_glass_adaptive.py` | Adaptive performance (§4). Enabled in Frosted only. |
 
-**`gui/aura_glass_setup_wizard.py`** runs *before* anything is installed.
-Contract: stdout is the flag list, one token per line, and nothing else may ever
-be printed there (`lib/steps-wizard.sh` reads it); exit 0 answered, exit 2
-cancelled (install stops, nothing changed), anything else falls back to the
-terminal wizard. `install.sh` **blocks** on it. Every question here has a twin in
-`install.sh`'s terminal wizard — parity is a stated rule, not enforced by code.
-
-**`gui/aura_glass_settings.py`** runs after install and refuses to open without
-`$CONF_DIR`. Pages: Glass (three mode tabs), Appearance, Corner rounding,
-Per-app blur, Extensions, Packages, System, Updates, Uninstall.
-
-Three kinds of thing deliberately do **not** ride on Apply:
-
-- **extension switches** — instant, reversible, unprivileged, but not settings
-  the installer resolves; they go through `bin/aura-glass-ext`;
-- **the Packages page** — a filesystem delete for a pack under `$HOME`; for one
-  under `/usr` it names the owning package and hands the command to a terminal,
-  because deleting a package's files out from under it leaves its database
-  describing files that are gone;
-- **anything root** — dependencies, `gnome-rounded-blur`, GDM, monitor sync, the
-  uninstall scopes. These **open a real terminal** rather than running `sudo`
-  down a pipe nothing can type into.
-
-**Live preview** is `bin/aura-glass-preview` (`begin` / `set` / `apps` /
-`revert` / `status`). It snapshots the installed sheets, the Blur My Shell dconf
-subtree and the affected memos, then calls the *same* `apply_*` functions with
-`PREVIEW_MODE=1` so nothing is remembered. Its one hard safety property: a
-preview must never leave a `$CONF_DIR` memo different from what it found.
-`tools/check-preview.sh` asserts that.
-
-More detail: [GUI.md](GUI.md).
+`install_if_changed` makes these quiet: an unchanged unit or binary isn't
+rewritten, and services aren't restarted.
 
 ---
 
-## 10. Migration and naming
+## 10. Concurrency: one writer at a time
 
-The project was renamed from `tahoe-glass`. `lib/steps-migrate.sh` moves a
-pre-rename install onto the current names, and the delicate part is the
-`backups/` merge — getting it wrong silently turns a clean uninstall into one
-that leaves every GTK4 app themed. `tools/check-migration.sh` drives that
-against fixture `HOME`s.
+`bin/aura-glass-operation` → `tools/aura_glass_operation.py` takes an exclusive
+`flock` on `~/.cache/aura-glass/operation.lock`. It waits up to 30 s
+(`AURA_GLASS_OPERATION_TIMEOUT`), then runs the command with the descriptor
+inherited (`AURA_GLASS_OPERATION_FD`), so nested writers see `held` and don't
+deadlock.
 
-Both names are still honoured at read time in `bin/aura-glass-apply` and
-`uninstall.sh`, and the theme directory is resolved from **disk** rather than
-from the dconf key — an install that predates the rename is still wearing
-`Tahoe-Dark`, and reading dconf would reach the real user's database even when
-`HOME` is overridden by a test fixture.
+- `install.sh` and `uninstall.sh` re-exec themselves under it, except for
+  `--help` and `--dry-run`.
+- `aura-glass-apply` re-execs under it.
+- The adaptive worker and the window menu go through it.
+- The live preview runs its operations under it, and `aura-glass-preview commit
+  --session S -- install.sh …` makes Apply the step that ends a preview, or
+  reverts on failure.
 
-The upstream theme's installer writes `~/.themes/Tahoe-Dark` from a string
-literal with no flag to change it, so the theme is **adopted after they run**
-(`adopt_theme_dir`) rather than installed under our name.
+A full install holds the lock for minutes. A GUI Apply started during it fails
+after 30 s instead of interleaving.
+
+---
+
+## 11. The GUI layer (summary; detail in [GUI.md](GUI.md))
+
+- `gui/aura_glass_setup_wizard.py` runs **before** install. Its stdout is the
+  flag list, one token per line. Exit 0 means answered, 2 means cancelled, and
+  anything else falls back to the text wizard in `install.sh`.
+- `gui/aura_glass_settings.py` runs **after** install and finds the checkout via
+  `$CONF_DIR/repo-path`. Apply is
+  `install.sh --settings-only --incremental --yes <changed flags>`, wrapped in
+  `aura-glass-preview commit` when a preview is active.
+- **Live preview** is `bin/aura-glass-preview` (`begin`/`set`/`apps`/`revert`/`status`/`commit`).
+  It snapshots sheets, the BMS dconf subtree and memos, then calls the same
+  `apply_*` with `PREVIEW_MODE=1`. Its hard rule is that **a preview never
+  leaves a memo different from what it found.**
+
+---
+
+## 12. Pinned upstreams (`lib/steps.sh`)
+
+| What | Repo | Pin |
+|---|---|---|
+| Base theme | kayozxo/GNOME-macOS-Tahoe | `6dfcd9d941e5` (installed as `Tahoe-Dark`, adopted as `Aura-Glass`) |
+| Blur My Shell | aunetx/blur-my-shell | `425761d55049` (v73) + 3 patches |
+| Custom OSD | neuromorph/custom-osd | `334ac17e9348` + GNOME 50/51 patch |
+| gnome-rounded-blur | kancko/gnome-rounded-blur | `a4db9e5947b1` (v1.0.2) |
+| Colloid / Reversal / MacTahoe icons | vinceliuice, yeyushengfan258, vinceliuice | `c9e702beb96f` / `2c8122287e3b` / `b85923bb87f5` |
+| Hatter icons | Mibea/Hatter | full SHA, shallow sparse fetch |
+| AOSP cursors | Tech-Tac/aosp-cursors | release 1.3.1 + sha256 |
+| Moga cursors | gnome-look.org/p/2302110 | release metadata resolved by `tools/moga_cursor.py` |
+| Fonts | Inter 4.1 (sha256), MiSans (sha256 as notice; URLs unversioned), SF Pro mirror `8bfea09aa6f1` | |
+
+`gnome-rounded-blur` is compiled rootless into `~/.local/lib` when `gcc` and
+`pkg-config` exist. Otherwise it falls back to the AUR helper or
+`meson … && sudo meson install`.
+
+---
+
+## 13. Naming and migration
+
+The project was renamed from `tahoe-glass`. `lib/steps-migrate.sh` moves an old
+`$CONF_DIR` (merging `backups/` carefully, since a wrong merge turns a clean
+uninstall into a themed one) and adopts the theme directory. `aura-glass-apply`
+and `uninstall.sh` still read both names. The theme is resolved **from disk**,
+not from dconf, so fixtures with an overridden `HOME` never touch the real
+user's database. The upstream installer writes `~/.themes/Tahoe-Dark` from a
+string literal, so the theme is adopted after it runs (`adopt_theme_dir`).

@@ -1,247 +1,196 @@
-# Developing
+# Developing and fixing bugs
 
-The working loop, and how to make each kind of change.
-
-Read [ARCHITECTURE.md](ARCHITECTURE.md) first if you have not — most of the
-rules below only make sense once you know why one place resolves a flag.
+The working loop, a bug-fixing protocol, and recipes for each kind of change.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) first. Most rules here only make sense
+once you know why one place resolves a flag.
 
 ---
 
 ## Setup
 
 ```bash
-git clone https://github.com/DevWebeloper/aura-glass.git
-cd aura-glass
-tools/install-hooks.sh        # once per clone — points core.hooksPath at tools/hooks
-./install.sh                  # you need an installed theme to develop against
+git clone https://github.com/DevWebeloper/aura-glass.git && cd aura-glass
+tools/install-hooks.sh        # once per clone: core.hooksPath → tools/hooks (pre-commit runs the checks)
+./install.sh                  # you develop against a real install
 ```
 
-`tools/install-hooks.sh --off` undoes the hook. `git commit --no-verify` skips
-it for one commit.
-
-No dependencies beyond what the installer already needs: bash, python3, git,
-plus PyGObject and libadwaita if you touch `gui/`.
-
----
+You need bash, python3 and git, plus PyGObject, libadwaita and pycairo for
+`gui/`. `tools/install-hooks.sh --off` disables the hook, and
+`git commit --no-verify` skips it once.
 
 ## The loop
 
 ```bash
-# 1. edit css/, dconf/, lib/, tokens/ …
-
-# 2. put it on the desktop you are sitting in front of
+# 1. edit css/ dconf/ lib/ tokens/ gui/ …
+# 2. hermetic checks (safe anywhere)
+tools/check-tokens.sh && tools/check-cascade.sh        # plus whichever checks own the area (TESTING.md)
+# 3. put it on the desktop you are sitting at (offline, rootless, seconds)
 ./install.sh --settings-only -y
-
-# 3. check the numbers still agree everywhere
-tools/check-tokens.sh && tools/check-cascade.sh
-
-# 4. commit — the hook runs the whole suite against the staged tree
+# 4. commit; the hook re-runs the suite on the staged tree
 git commit
 ```
 
-Step 2 is not optional. **A repo edit is not a finished change**; the
-stylesheets that matter are the copies in `~/.config/aura-glass` spliced into
-`~/.themes`. `--settings-only` reapplies the dconf preset, the CSS and the
-gsettings and leaves the theme and extensions alone: no root, no network, a few
-seconds. The shell reloads itself; GTK apps need a restart.
-
-Full re-install when you changed something `--settings-only` skips (a pinned
-upstream, an extension, an icon or cursor pack):
-
-```bash
-./install.sh --full          # or the specific flags you need
-./install.sh --dry-run       # print what would happen, change nothing
-```
+**A repo edit isn't a finished change.** What the desktop loads are the copies
+in `~/.config/aura-glass` spliced into `~/.themes` and `~/.config/gtk-*`.
+`--settings-only` refreshes them in seconds with no root and no network. The
+shell reloads itself, but GTK apps need a restart. Use a full `./install.sh`
+(or `--force`) when you've changed something a retune skips: a pin, an
+extension, a pack, or the `dconf/core.ini` preset itself, which isn't reloaded
+on an existing install without `--force`.
 
 ---
 
-## Seeing a visual change without logging out
+## Bug-fixing protocol
 
-### The headless preview harness
+### 1. Classify the bug by its path
 
-```bash
-tools/preview.sh                       # shell screenshots from the current tree
-tools/preview.sh --gtk-only [app]      # one GTK app on your own session
-tools/preview.sh --solid               # render the --no-blur look
-tools/preview.sh --transparency 0.85   # translucent windows at that level
-tools/preview.sh --tint 70             # how much theme colour survives vs black
-tools/preview.sh --style adwaita       # a different titlebar button style
-tools/preview.sh --gpu                 # sample GPU busy% while it runs
-tools/preview.sh --keep                # leave the session up
-tools/preview.sh --res 2560x1440
-```
+Most bugs here are one front end disagreeing with another, so first find
+**which path** produced the wrong state:
 
-It renders the **real shell against the real theme** in about a minute and drops
-PNGs in `screenshots/preview/` (gitignored). It needs an installed theme — it
-previews a working copy, it does not build one from scratch.
+| The user did… | Path | Start reading |
+|---|---|---|
+| Ran `./install.sh` | full install | `install.sh` bottom section, then the step's file |
+| Pressed Apply in the settings app | `--settings-only --incremental` (narrow, or full fallback) | `lib/steps-apply-plan.sh`, the incremental branch of `install.sh` |
+| Dragged a slider and saw it live | `aura-glass-preview set/apps` | `bin/aura-glass-preview`, `gui/preview_queue.py` |
+| Switched mode | full retune with `--glass-mode` | `lib/steps-modes.sh`, `load_dconf` |
+| Nothing (battery, GPU, game, top-bar menu) | adaptive worker → `--adaptive-blur` | `tools/aura_glass_adaptive.py`, `apply_adaptive_blur` |
+| Used "Blur This App" | `aura-glass-operation app-blur` | `extension.js` `_toggleBlur`, `aura-glass-preview app-blur`, `apply_app_blur` |
+| Changed monitors or logged in | services | `tools/aura_glass_panel_blur.py`, `bin/aura-glass-icon-sync`, `bin/aura-glass-gdm-sync` |
+| Updated the theme or upstream | `aura-glass-apply` | `bin/aura-glass-apply` |
 
-Isolation is four separate things and all four are needed:
-`dbus-run-session` (a private bus so the preview owns `org.gnome.Shell`), `HOME`
-(User Themes reads `~/.themes` relative to it, governed by no XDG variable),
-`XDG_{CONFIG,DATA,CACHE}_HOME`, and `XDG_RUNTIME_DIR` — that last one is not
-optional, because the live session leaves
-`$XDG_RUNTIME_DIR/gnome-shell-disable-extensions` lying around and sharing it
-renders a stock desktop that looks exactly like the theme having failed.
+### 2. Find the owner
 
-This is a **headless render, not a window you can click**. `mutter --nested` is
-gone from mutter 18, so a shell started inside your session takes the native
-backend and dies with EBUSY. `--headless --virtual-monitor` is the mode that
-works, and only the screenshot API can see its output.
+Use [FEATURE-MAP.md](FEATURE-MAP.md) to go from a feature to its files and
+function, and the ownership map in [STRUCTURE.md](STRUCTURE.md) §4 for who
+writes the state you're looking at.
 
-`tools/preview-session.sh` is the inside of that harness and expects `HOME` and
-the XDG variables to be redirected already. **Do not run it directly** — against
-your own `HOME` it would overwrite the GSettings keyfile and theme of the
-desktop you are using.
-
-### Comparing runs
-
-Every run is compared against the last accepted run of the same mode:
+### 3. Capture the state before touching anything
 
 ```bash
-python3 tools/check-shots.py --mode glass            # what moved
-python3 tools/check-shots.py --mode glass --accept   # adopt this run as baseline
-python3 tools/check-shots.py --mode solid --list     # what is in the baseline
+gnome-shell --version; echo "$XDG_SESSION_TYPE"
+./install.sh --settings-only --dry-run          # prints the resolved "glass-mode:" line
+ls ~/.config/aura-glass ~/.config/aura-glass/modes/*
+head -n 50 ~/.config/aura-glass/{glass-mode,app-transparency,app-tint-color,app-blur-scope} 2>/dev/null
+dconf dump /org/gnome/shell/extensions/blur-my-shell/ | grep -E '^\[|^blur=|^notification='
 ```
 
-`glass` and `solid` keep separate baselines.
+### 4. Reproduce off the desktop when you can
 
-### One GTK window, fast
+Most of the installer runs fine against a **fixture `HOME`**. That's how the
+existing checks work. You need a temp `HOME` with:
 
-`.claude/scene.py` (local, gitignored) renders a single GTK window headlessly in
-about a second — for when a CSS edit needs *guessing* which selector paints
-which surface. See `.claude/README.md`. It cannot show blur or window
-transparency truthfully: with no compositor behind the window everything
-composites against black.
+- `~/.themes/Aura-Glass/gnome-shell/gnome-shell.css`
+- `~/.config/gtk-4.0/gtk.css`
+- `~/.config/aura-glass/backups/*.absent`
 
-### GPU cost
+and stub `dconf`, `gsettings`, `gnome-extensions`, `systemctl` and
+`gnome-shell` (printing `GNOME Shell 50.1`) first on `PATH`, plus
+`XDG_CURRENT_DESKTOP=GNOME`. Then run `install.sh --settings-only …`
+**without** `--dry-run`, and inspect the memo files and the stub log. The
+reproductions in [KNOWN-ISSUES.md](KNOWN-ISSUES.md) were made this way. Don't
+add new scripts under `tools/` for this unless asked.
 
-```bash
-tools/gpu-live.sh --label before      # on the session you actually use
-tools/gpu-live.sh --quick             # skip the scenarios needing your hands
-python3 tools/gpu-sample.py --probe   # is there a counter on this machine
-```
+### 5. Fix at the owner, not at the symptom
 
-The headless harness **cannot** see this class of cost — it renders to a virtual
-monitor and never pays the repaint a real display does. Panel sigma was tuned
-against the harness for an afternoon and moved nothing for exactly that reason.
-Sigma changes are design decisions with a measurable cost: change one, measure
-it, record the number in `tokens/tokens.sh`, and do not batch them.
+- Wrong value resolved → fix the resolution block or the `apply_*`, never the front end.
+- Front end shows the wrong value → make it read where the resolver reads (C5 in [CONSISTENCY.md](CONSISTENCY.md)).
+- One path forgets a step another path does → share the step, don't copy it.
+- Keep the scope to the bug. No drive-by refactors, no unrequested validation.
+
+### 6. Verify on every path the fix touches
+
+Walk the stability checklist in [CONSISTENCY.md](CONSISTENCY.md) §4: CLI,
+incremental, mode switch on an existing install, settings app re-read, wizards,
+preview, adaptive, uninstall. Then run the hermetic suite. Then apply it live
+with `./install.sh --settings-only -y` and look at it.
+
+### 7. Record it
+
+Move the entry in [KNOWN-ISSUES.md](KNOWN-ISSUES.md) to **Fixed**, with the
+commit. If the reason for a number changed, update its comment.
 
 ---
 
-## How to make each kind of change
+## Recipes
 
-### Add a flag
+### Add or change a flag
 
-1. Declare the variable and its `*_EXPLICIT` twin at the top of `install.sh`.
-2. Parse it in the argument `case` block; set `_EXPLICIT` there and nowhere else.
-3. Resolve it in the precedence block: `_EXPLICIT` wins, then the mode drawer if
-   it is a mode-owned setting, then `$CONF_DIR/<name>`, then the default.
-   Validate there — a typo must die before anything has been written.
-4. Consume it in an `apply_*` in `lib/steps-css.sh` or `lib/steps-dconf.sh`, and
-   write the memo back as that function's last step, guarded by `remembering`.
-5. Add the row to `README.md`'s options table.
-6. If it belongs in the UI, add it to **all three**: the settings window, the
-   setup wizard, and `install.sh`'s terminal wizard. Wizard parity is a stated
-   rule, not something code enforces — a question added to one and not the other
-   is a setting half your users are never offered.
-7. `python3 tools/check-gui-flags.py && python3 tools/check-wizard-flags.py`.
+1. Declare `VAR` and `VAR_EXPLICIT` at the top of `install.sh`.
+2. Parse it in `parse_flags`, setting `_EXPLICIT` there and nowhere else.
+3. Resolve and validate it in the resolution block (flag → drawer if mode-owned → memo → default). A typo must `die` before anything is written.
+4. Consume it in an `apply_*`, and write the memo last, under `remembering`.
+5. If it's mode-owned, add it to `seed_glass_mode`, `load_glass_mode_memos` and `save_glass_mode_memos`, to `Settings.modes` in the GUI, and to the restore branch of `apply_adaptive_blur`.
+6. If the GUI sends it, decide its incremental class in `select_apply_actions`. If it's narrow, make sure the narrow path writes everything the full path does.
+7. Add it to `--help` (`usage`), [CONFIG-REFERENCE.md](CONFIG-REFERENCE.md), and, if user-facing, the settings app plus **both** wizards.
+8. Run `python3 tools/check-gui-flags.py && python3 tools/check-wizard-flags.py && python3 tools/check-incremental-apply.py`.
 
 ### Add or change a stylesheet
 
-1. Name it `shell-NN-*.css` or `gtk4-NN-*.css`. **The prefix is the cascade
-   position** and is load-bearing — put a new sheet where its cascade needs it,
-   not at the end.
-2. Add it to `SHELL_SNIPPETS` or `GTK4_SNIPPETS` in `bin/aura-glass-apply`, in
-   prefix order.
-3. `install_css` globs the numbered sheets automatically. An **optional** sheet
-   (one a flag installs or removes) needs its own branch there — it must be
-   installed or deleted, never switched on at read time, because
-   `aura-glass-apply` concatenates what it finds and cannot know your flags.
+1. Name it `shell-NN-*.css` / `gtk4-NN-*.css`. The prefix is the cascade position.
+2. Add it to `SHELL_SNIPPETS` / `GTK4_SNIPPETS` in `bin/aura-glass-apply`, in prefix order.
+3. Numbered sheets are globbed by `install_css`. An optional sheet needs an explicit install-or-delete branch.
 4. Add it to `tools/preview-session.sh` if the preview should render it.
-5. `tools/check-cascade.sh`.
+5. Run `tools/check-cascade.sh`. If it carries a token value, also `tools/check-tokens.sh` and a `token_manifest.py` entry.
 
 ### Change a radius, sigma or transparency value
 
-1. Edit `tokens/tokens.sh` — the token *and* the comment saying why.
-2. Edit every consumer the comment names.
-3. Radii: update all seven preset rows in `radius_preset_values`, the bounds in
-   `radius_bounds`, **and** the window's own copy in
-   `gui/aura_glass_settings.py`.
-4. `tools/check-tokens.sh && python3 tools/check-gui-radius.py &&
-   tools/check-radius-preset.sh`
-5. **Raise a radius against a screenshot, never an estimate.** The OSD ceiling
-   in particular has nothing to do with the other seven — it is set by the
-   height of the box being blurred, and past half of it the corner arcs overlap
-   into an ellipse.
+1. Edit `tokens/tokens.sh`: the value **and** its reason.
+2. Edit every consumer its comment names (see FEATURE-MAP §8).
+3. Radii: also the preset rows (`radius_preset_values`), the bounds (`radius_bounds`) and the GUI copy (`RADIUS_PRESET_VALUES`, `RADIUS_SURFACES`).
+4. Run `tools/check-tokens.sh && python3 tools/check-gui-radius.py && tools/check-radius-preset.sh`.
+5. Raise a radius against a screenshot, never an estimate. Measure sigma changes on a real session (`tools/gpu-live.sh`, humans only) and record the number.
 
-Remember the project rule: a painted radius must equal the blur radius behind
-it, so `apply_radius_css` and `apply_radius_dconf` always move together.
+The rule: a painted radius equals the blur radius behind it, so
+`apply_radius_css` and `apply_radius_dconf` always move together.
 
 ### Add an extension
 
-1. Append the UUID to `EXT_EXTRA_RECOMMENDED` and/or `EXT_EXTRA_ALL` in
-   `lib/steps.sh`.
-2. Give it an `ext_description` — the settings window builds its Extensions page
-   from `aura-glass-ext list`, so an undescribed UUID is an empty row.
-3. If it must never arrive switched on by a pack, add it to `EXT_NO_AUTO_ENABLE`
-   and say why in the comment.
-4. If it needs settings, add them to `dconf/extras.ini`.
-5. `tools/check-ext-catalogue.sh`.
+1. Append the UUID to `EXT_EXTRA_RECOMMENDED` and/or `EXT_EXTRA_ALL` (`lib/steps.sh`) and give it an `ext_description`.
+2. `EXT_NO_AUTO_ENABLE` if a pack must never switch it on. Settings go in `dconf/extras.ini`.
+3. Update the text wizard's prose list, `--help` counts, and `uninstall.sh`'s removal list.
+4. Run `tools/check-ext-catalogue.sh`.
 
 ### Bump a pinned upstream
 
-Pins live at the top of `lib/steps.sh`. Bump the ref, re-apply any patch in
-`patches/` that no longer applies cleanly, then:
-
-```bash
-./install.sh --full --force
-tools/preview.sh
-python3 tools/check-shots.py --mode glass
-```
-
-A theme that changes under the CSS tweaks produces a half-applied look with **no
-error message**, which is why these are pinned in the first place. Diff the
-screenshots before you accept the bump.
+Change the ref in `lib/steps.sh`. Re-make any patch in `patches/` that no
+longer applies. Then a human runs `./install.sh --full --force`, then
+`tools/preview.sh` and `python3 tools/check-shots.py --mode glass`, and diffs
+the screenshots before accepting. Upstreams are pinned because a theme that
+moves under the CSS fails silently.
 
 ### Touch the GUI
 
-`gui/` never writes theme files. It composes `install.sh --settings-only --yes
-<changed flags>` and runs it. Constraints:
+See [GUI.md](GUI.md). In short: it emits flags only, sends only what changed,
+reads state where the installer reads it, and opens a real terminal for
+anything that needs root. Run `check-gui-flags.py`, `check-wizard-flags.py`,
+`check-gui-radius.py`, `check-terminal-spawn.py`, `check-preview-queue.py` and
+`check-apply-lifecycle.py`.
 
-- Standard library plus PyGObject only. The setup wizard may not import
-  anything `lib/distro.sh` does not probe for — not even pycairo.
-- The setup wizard's **stdout is the flag list, one token per line, and nothing
-  else may ever be printed there.** Human output goes to stderr. Exit 0 =
-  answered, 2 = cancelled (install stops, nothing changed), anything else falls
-  back to the terminal wizard.
-- `install.sh` blocks on the wizard. The settings window spawns terminals it
-  never waits for. Do not swap those.
-- Anything needing root opens a real terminal. `sudo` down a pipe nothing can
-  type into blocks forever.
+### Touch the adaptive worker or the panel-blur worker
 
-Then run `check-gui-flags.py`, `check-wizard-flags.py`, `check-gui-radius.py`
-and `check-terminal-spawn.py`.
+Their launchers prefer the **installed** copy in `~/.local/share/aura-glass/`.
+After editing `tools/aura_glass_{adaptive,panel_blur}.py`, a retune reinstalls
+them. Then `systemctl --user restart aura-glass-adaptive` (or `-panel-blur`).
+Checks: `check-adaptive-worker.py`, `check-adaptive-installer.sh`,
+`check-panel-blur-events.py`.
+
+---
+
+## Seeing a change without logging out (humans only)
+
+| Tool | What it does |
+|---|---|
+| `tools/preview.sh [--solid\|--gtk-only APP\|--transparency L\|--tint N\|--style S\|--gpu\|--keep\|--res WxH]` | Renders the real shell against the real theme headlessly (`dbus-run-session`, private `HOME`/XDG dirs, `mutter --headless --virtual-monitor`) into `screenshots/preview/`. Needs an installed theme. Never run `tools/preview-session.sh` directly: against your own `HOME` it overwrites your desktop's settings. |
+| `python3 tools/check-shots.py --mode glass [--accept\|--list]` | Visual diff against the last accepted run. Glass and solid keep separate baselines. |
+| `.claude/scene.py NAME [--css\|--live]` | Local helper that renders one GTK window in about a second, to find which selector paints which surface. Without a compositor, blur and transparency render against black. |
+| `tools/gpu-live.sh --label before`, `python3 tools/gpu-sample.py --probe` | GPU cost on the real session. The headless harness can't see repaint cost. |
 
 ---
 
 ## House style
 
-**Bash.** `set -euo pipefail`. Every filesystem mutation goes through `run()` so
-`--dry-run` stays honest. Every overwrite goes through `backup_once` so
-uninstall stays complete. Every memo write is guarded by `remembering()` so dry
-runs and live previews leave nothing behind. Output uses `step/info/ok/warn/
-skip/die` from `lib/common.sh`, never bare `echo`.
-
-**Comments.** Every non-obvious number carries a comment saying why it is that
-number — usually the result of a bisection against a screenshot. Those comments
-are the deliverable. When you change a value, change the reason with it. If you
-cannot state the reason, do not change the value.
-
-**Scope.** Do the change that was asked for. No unrequested validation, defensive
-branches, or drive-by refactors.
-
-**Naming.** Both `aura-glass` and the pre-rename `tahoe-glass` are honoured at
-read time in `bin/aura-glass-apply` and `uninstall.sh`. New code writes only the
-current name; do not remove a legacy read path without checking
-`tools/check-migration.sh`.
+- **Bash.** `set -euo pipefail`. Mutations go through `run` (dry-run honesty). Overwrites go through `backup_once` (uninstall completeness). Memo writes go through `remembering` (dry-run, preview and adaptive invisibility). Output uses `step/info/ok/warn/skip/die`, never bare `echo`.
+- **Python.** Standard library + PyGObject (+ pycairo in the settings app). The setup wizard may import only what `lib/distro.sh` probes for.
+- **Comments are the deliverable.** Every non-obvious number says why it's that number, usually the result of a bisection against a screenshot. Change the reason with the value. Don't change a value whose reason you can't state.
+- **Naming.** New code writes only `aura-glass`. Legacy `tahoe-glass` read paths stay until `check-migration.sh` says otherwise.
+- **Commits.** `type(scope): lower-case sentence, no trailing period`, e.g. `fix(modes): …`, `feat(gui): …`, `docs: …`. No AI attribution anywhere (see [RELEASING.md](RELEASING.md)).

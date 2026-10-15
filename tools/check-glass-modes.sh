@@ -23,8 +23,12 @@ trap 'rm -rf "$scratch"' EXIT
 # config dir and a theme directory even though neither holds anything real.
 mkdir -p "$scratch/.config/aura-glass" "$scratch/.themes/Aura-Glass"
 
+# A dry run seeds a throwaway copy of the drawers (KI-08). The seeding and
+# switch-back cases below are about what lands in those drawers across runs, so
+# point the dry run at the fixture's own modes/ instead.
 in_scratch() {   # in_scratch FLAG...
-    HOME="$scratch" bash "$ROOT/install.sh" --settings-only --dry-run --yes "$@"
+    HOME="$scratch" AURA_GLASS_DRY_MODES="$scratch/.config/aura-glass/modes" \
+        bash "$ROOT/install.sh" --settings-only --dry-run --yes "$@"
 }
 
 # The resolved state is not printed by install.sh, so ask it for the one thing
@@ -66,8 +70,8 @@ fi
 
 # The per-mode drawer, on the same scratch CONF_DIR as everything above. The
 # resolutions already run above have their own opinions about --glass-mode
-# frosted/transparent/solid, and seed_glass_mode writes even under --dry-run —
-# so modes/ already holds whatever those left behind. Start this drawer clean
+# frosted/transparent/solid, and seed_glass_mode writes into the drawer
+# in_scratch names — so modes/ already holds whatever those left behind. Start this drawer clean
 # rather than assume it is, and give it the disk values the seeding cases below
 # are actually about — one non-default value per key the drawer keeps.
 rm -rf "$scratch/.config/aura-glass/modes"

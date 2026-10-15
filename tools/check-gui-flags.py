@@ -56,6 +56,7 @@ def state(**kw):
     s.shell_tint = kw.get("shell_tint", "#000000")
     s.blur_strength = kw.get("blur_strength", 100)
     s.popup_brightness = kw.get("popup_brightness", 115)
+    s.window_brightness = kw.get("window_brightness", 100)
     s.notification_opacity = kw.get("notification_opacity", 40)
     s.allow = list(kw.get("allow", ["org.gnome.Nautilus", "org.gnome.Console"]))
     s.block = list(kw.get("block", ["*chrome*", "*electron*"]))
@@ -80,12 +81,14 @@ def state(**kw):
     s.modes = {
         "frosted": {"transparency": "0", "app_tint": "#000000",
                     "shell_tint": "#000000", "blur_strength": 100,
-                    "popup_brightness": 115, "notification_opacity": 40,
+                    "popup_brightness": 115, "window_brightness": 100,
+                    "notification_opacity": 40,
                     "popup_blur": True, "notification_blur": True,
                     "scope": "gtk"},
         "performance": {"transparency": "1.00", "app_tint": "#000000",
                         "shell_tint": "#000000", "blur_strength": 100,
-                        "popup_brightness": 115, "notification_opacity": 40,
+                        "popup_brightness": 115, "window_brightness": 100,
+                        "notification_opacity": 40,
                         "popup_blur": False, "notification_blur": False,
                         "scope": "none"},
     }
@@ -252,6 +255,12 @@ CASES = [
 
     ("popup blur brightness back to the preset",
      state(popup_brightness=90), state(), ["--popup-brightness", "115"]),
+
+    ("window blur brightness moved", FROSTED, state(window_brightness=90),
+     ["--window-brightness", "90"]),
+
+    ("window blur brightness back to the preset",
+     state(window_brightness=90), state(), ["--window-brightness", "100"]),
 
     ("notification ground moved", FROSTED, state(notification_opacity=25),
      ["--notification-opacity", "25"]),
@@ -483,6 +492,11 @@ def check_blur_state_model():
         failures.append("blur_state: block wildcard in all scope got %r"
                         % (got,))
 
+    got = blur_state("google-chrome", ["google-chrome"], ["*chrome*"], "all")
+    if got != (True, "exact", "google-chrome"):
+        failures.append("blur_state: allow match overrides block in all scope got %r"
+                        % (got,))
+
     on, reason, _pattern = blur_state("org.gnome.Console", [], [], "all")
     if (on, reason) != (True, "default"):
         failures.append("blur_state: absent from block in all scope got %r"
@@ -582,7 +596,8 @@ if any(os.path.isdir(os.path.join(os.path.expanduser("~"), ".themes", n))
         level = "%.2f" % (percent / 100.0)
         res = subprocess.run(
             ["bash", os.path.join(ROOT, "install.sh"), "--settings-only",
-             "--dry-run", "--yes", "--app-transparency", level],
+             "--dry-run", "--yes", "--glass-mode", "frosted",
+             "--app-transparency", level],
             capture_output=True, text=True)
         out = res.stdout + res.stderr
         got_level, got_actor = LEVEL.search(out), ACTOR.search(out)

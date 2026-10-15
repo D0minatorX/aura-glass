@@ -1,6 +1,7 @@
-/* ---------- Solid mode ----------
- * Installed only by --no-blur, and concatenated after every sheet above so it
- * wins on equal specificity.
+/* ---------- Performance mode (no blur) ----------
+ * Installed by --glass-mode performance (or --no-blur) and by adaptive
+ * performance while it is active, and concatenated after every sheet above so
+ * it wins on equal specificity.
  *
  * Translucency and blur are one effect, not two. Every fill in the sheets above
  * is translucent *because* something blurs what is behind it — take the blur

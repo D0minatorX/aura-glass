@@ -241,7 +241,7 @@ class Answers:
         self.font = read_memo("font") or "system"
         self.blur = True
         self.popup_blur = True
-        self.scope = "gtk"          # gtk | all | none
+        self.scope = "all"          # all | gtk | none
         self.transparency = "0.90"
         self.want_icons = True
         # The recommended pair, and the wizard's defaults. Both go out as an
@@ -276,7 +276,7 @@ class Answers:
         """Every default this project would pick for itself.
 
         Everything else about the look is already __init__'s own default —
-        accent and font from their memos, Reversal and AOSP recommended
+        accent and font from their memos, Reversal and Moga recommended
         rather than install.sh's older bare defaults of Colloid and Adwaita.
         Only the three questions with no single obviously-right answer move:
         every extension rather than the Core tier (the same set
@@ -591,14 +591,14 @@ class Window(Adw.ApplicationWindow):
     def page_blur(self):
         page = Adw.PreferencesPage()
         group = Adw.PreferencesGroup(
-            title="Frosted glass, or solid",
+            title="Frosted glass, or performance",
             description="The blur is the look, and what costs the GPU. "
-                        "Solid keeps the theme but drops the transparency.")
+                        "Performance keeps the theme but drops the blur.")
         self.radio_rows(group, [
             ("frosted", "Frosted glass",
              "Blur behind the top bar, popups, menus and the volume pill",
              None),
-            ("solid", "Solid",
+            ("solid", "Performance",
              "No blur anywhere — lighter on older GPUs and on battery", None),
         ], "frosted" if self.answers.blur else "solid",
             lambda value: setattr(self.answers, "blur", value == "frosted"))
@@ -624,11 +624,11 @@ class Window(Adw.ApplicationWindow):
                         "frame — worth asking separately from the switch "
                         "above.")
         self.radio_rows(scope, [
-            ("gtk", "GTK and GNOME apps",
-             "Files, Settings, Console and the rest — light on the CPU", None),
             ("all", "Every app window",
              "Browsers, Electron apps and games too — heavy on the CPU and GPU",
              None),
+            ("gtk", "GTK and GNOME apps",
+             "Files, Settings, Console and the rest — light on the CPU", None),
             ("none", "No window blur",
              "Windows stay crisp, with a touch of transparency and no cost",
              None),
@@ -836,7 +836,7 @@ class Window(Adw.ApplicationWindow):
                 scope, "blurred" if answers.popup_blur else "flat")
             transparency = "%d%%" % round(float(answers.transparency) * 100)
         else:
-            blur = "Solid — no blur anywhere"
+            blur = "Performance — no blur anywhere"
             transparency = "Opaque"
 
         selected = set(answers.extensions or [])

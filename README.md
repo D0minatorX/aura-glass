@@ -5,15 +5,29 @@
 [![Stars](https://img.shields.io/github/stars/DevWebeloper/aura-glass?style=flat-square&color=gold)](https://github.com/DevWebeloper/aura-glass/stargazers)
 [![License](https://img.shields.io/github/license/DevWebeloper/aura-glass?style=flat-square)](LICENSE)
 
-> **A fluid, frosted-glass desktop for GNOME 48–51.**  
-> Real dynamic background blur, macOS-inspired ergonomics, adaptive accent integration, and unified system theming — installed in seconds without root.
+> **A frosted-glass desktop for GNOME Shell 48–51.**
+> Real background blur behind the panel, menus, Quick Settings, notifications,
+> dialogs and app windows, one consistent shape language across the shell, GTK4
+> and GTK3, and a settings app to retune it all. Everything installs under your
+> home directory and comes back out with `./uninstall.sh`.
 
 ---
 
-## ⚡ Quick Start
+## What it is
 
-### 1. Install
-Clone the repository and run the installer:
+Aura Glass is not a single theme file. It assembles a desktop from pinned
+upstream pieces and then ties them together so they agree with each other:
+
+| Piece | Where it comes from | What Aura Glass does to it |
+|---|---|---|
+| Shell + GTK theme | [GNOME-macOS-Tahoe](https://github.com/kayozxo/GNOME-macOS-Tahoe), pinned | installs it as `Aura-Glass`, flattens its shadows/gradients, swaps its hard-coded blues for your GNOME accent, splices in its own stylesheets |
+| Blur | [Blur My Shell](https://github.com/aunetx/blur-my-shell) v73, built from a pinned commit | three patches (overview, sub-windows, separate notification blur) plus a tuned preset |
+| Volume / brightness OSD | [Custom OSD](https://github.com/neuromorph/custom-osd), pinned and patched for GNOME 50/51 | a compact pill that sits on the blur |
+| Aura Glass Helper | first-party extension in `extensions/` | "Blur This App" in the window menu, the adaptive-performance menu in the top bar, a D-Bus bridge for the settings app |
+| Icons, pointers, fonts | Colloid / Reversal / Hatter icons; Adwaita / AOSP / MacTahoe / Moga pointers; Inter / MiSans / SF Pro | optional, picked in the wizard, accent-matched where the pack supports it |
+| Settings app | `gui/` (GTK4 + libadwaita) | retunes everything without re-running the installer by hand |
+
+## Quick start
 
 ```bash
 git clone https://github.com/DevWebeloper/aura-glass.git
@@ -21,74 +35,92 @@ cd aura-glass
 ./install.sh
 ```
 
-A clean, graphical setup wizard will guide you through:
-- 🎨 **Accent Color** — Matches GNOME native accents (Purple, Blue, Teal, Green, etc.)
-- 🪟 **Glass Mode** — Frosted Glass (blur) vs. Lightweight Solid (low GPU)
-- 💎 **Translucency & Tint** — Dial in your preferred window glass opacity
-- 🖱️ **Icons & Cursors** — Choose between Colloid, Reversal, MacTahoe, or Neon pointers
-- 🔒 **Login Screen (GDM)** — Optional blurred login screen with live wallpaper sync
+With no options in a terminal, `install.sh` opens a setup wizard (a GTK window
+when one can be shown, the same questions in the terminal otherwise). It asks
+for:
 
-> **Non-interactive / Fast Install:**  
-> Run `./install.sh --full -y` to install the complete recommended experience with a single command.
+- **Accent colour.** One of GNOME's nine accents. The shell and GTK apps follow it live.
+- **Blur.** Behind popups and menus, and behind app windows: all apps (the default), GTK/GNOME apps only, or none.
+- **Window transparency.** 90 % (default), 82 % or 95 %.
+- **Icons, pointer, pointer size, interface font.**
+- **Extensions.** Core (6 curated), Complete (all 8), a custom pick, or minimal.
+- **Login screen (GDM).** Optional. Themed and blurred, with live wallpaper sync. This needs `sudo`.
 
-### 2. Apply
-Simply **log out and log back in** to enjoy your new frosted-glass desktop!
+Non-interactive: `./install.sh --full -y`.
 
----
+**Then log out and back in.** Extensions can't be loaded into a running Wayland
+session. The settings app opens itself once on your next login.
 
-## ✨ Features
+## Glass modes
 
-- 🌫️ **Real Dynamic Blur** — Seamless background blur behind the top bar, Quick Settings, menus, notifications, dialogs, and application windows.
-- 🎛️ **Dedicated Settings App** — Open **Aura Glass Settings** from your app grid to adjust corner rounding, glass tint, window opacity, and toggle per-app blur in real time.
-- ⚡ **Adaptive Performance Mode** — An intelligent top-bar profile switcher (**Auto / Glass / Performance**) that automatically reduces blur overhead during fullscreen gaming, heavy GPU loads (≥80%), or battery discharge.
-- 🔊 **Capsule OSD** — Sleek, compact pill for volume and brightness that floats over wallpaper blur.
-- 🖼️ **Dynamic GDM Wallpaper Sync** — The login screen automatically adapts and blurs whenever your desktop wallpaper changes.
-- 📦 **Zero System Bloat** — Assets install strictly in `$HOME` (`~/.local/` and `~/.config/`). Undo everything cleanly at any time with `./uninstall.sh`.
-
----
-
-## 🐧 Distro Compatibility
-
-Aura Glass works out of the box across major Linux distributions running GNOME Shell 48 to 51:
-
-| Distribution | Package Manager / Installation Method |
+| Mode | What you get |
 |---|---|
-| **Arch / CachyOS / EndeavourOS** | `./install.sh` or via AUR: `yay -S aura-glass-git` |
-| **Fedora 40+** | `./install.sh` (automatic `dnf`/`dnf5` dependencies) |
-| **Ubuntu 24.04+ / Debian 13+** | `./install.sh` (automatic `apt` dependencies) |
-| **openSUSE Tumbleweed / Leap** | `./install.sh` (automatic `zypper` dependencies) |
+| **Frosted** (default) | Blur behind the panel, menus, Quick Settings, notifications, dialogs and app windows, plus translucent surfaces tuned for it. |
+| **Performance** | No blur shaders at all, so no blur GPU cost. Keeps the shapes, radii, accent and tints, with opaque or adjustable-opacity surfaces. |
 
----
+Each mode remembers its own tint and transparency. Switch between them in
+**Aura Glass Settings → Glass**, or run `./install.sh --settings-only --glass-mode performance -y`.
 
-## 🛠️ Handy Commands
+**Adaptive performance** sits on top of Frosted. A top-bar menu offers
+**Auto / Full Glass / Performance**. In *Auto*, blur is dropped temporarily
+while you're on battery, while the GPU is busy (≥ 80 % for ~6 s), or while a game
+you picked is focused and fullscreen. It comes back when the trigger clears.
+Your saved settings are never changed by this.
+
+## Aura Glass Settings
+
+Open **Aura Glass** from the app grid, or run `aura-glass-settings`.
+
+- **Glass.** Mode, tints, transparency, blur strength, popup and window blur brightness, notification ground.
+- **Appearance.** Accent, icons, pointer and its size, font, titlebar buttons and their style.
+- **Corner rounding.** Seven presets or eight per-surface values. The blur behind always matches the corner painted on top.
+- **Per-app blur.** A switch per app, the windows open right now, wildcard patterns, and the games that trigger Performance.
+- **Extensions, Packages, System, Updates, Uninstall.**
+
+Changes can be previewed live and are applied with one button.
+
+## Handy commands
 
 ```bash
-# Re-apply CSS & dconf after updates or theme tweaks (instant, offline)
-aura-glass-apply
-
-# Re-tune an existing install without redownloading assets
-./install.sh --settings-only -y
-
-# Check for updates
-aura-glass-update-check
-
-# Battery saver / low-spec mode (themed, but zero blur GPU overhead)
-./install.sh --full --no-blur -y
-
-# Completely remove Aura Glass and restore system defaults
-./uninstall.sh
+aura-glass-apply                     # re-splice the CSS after a theme/upstream update (offline, instant)
+./install.sh --settings-only -y      # re-apply settings without re-downloading anything
+./install.sh --dry-run               # show what a run would do, change nothing
+./install.sh --help                  # every option
+aura-glass-ext list                  # the extension catalogue
+aura-glass-update-check              # is there a newer release?
+./uninstall.sh                       # put everything back (see --help for scopes)
 ```
 
----
+`~/.local/bin` must be on your `PATH`. For fish: `fish_add_path ~/.local/bin`.
 
-## 🤝 Contributing & Documentation
+## Requirements and support
 
-- [Architecture & Design Guide](docs/ARCHITECTURE.md)
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [AUR Packaging Guide](packaging/aur/README.md)
+- GNOME Shell **48, 49, 50 or 51**. Wayland is strongly preferred, since Blur My Shell is far less reliable on X11.
+- `bash`, `python3`, `git`, `curl`, plus whatever the installer offers to install for your distro.
+- The settings app and setup window also need PyGObject, libadwaita and pycairo (on Debian/Ubuntu that's `python3-gi python3-gi-cairo gir1.2-adw-1`).
 
----
+| Family | Status |
+|---|---|
+| Arch / CachyOS / EndeavourOS | the tested path. `./install.sh`. An AUR recipe lives in [packaging/aur](packaging/aur/) |
+| Fedora, Debian / Ubuntu, openSUSE | dependency mappings exist and the installer runs, but preflight reports them as untested |
 
-## 📄 License
+Nothing outside `$HOME` is touched except three opt-in steps: the dependency
+install, the `gnome-rounded-blur` fallback build, and the GDM login screen.
 
-GPL-3.0-or-later © [DevWebeloper](https://github.com/DevWebeloper)
+## Troubleshooting
+
+- **Looks half-applied after an update?** Run `aura-glass-apply`, then log out and back in.
+- **GTK apps didn't change?** Restart them. The shell reloads itself.
+- **Reporting a bug?** Include `gnome-shell --version`, your session type, your distro, the output of `./install.sh --dry-run`, and `ls ~/.config/aura-glass`.
+
+## Documentation
+
+- [docs/README.md](docs/README.md) is the contributor documentation index: architecture, maps, configuration, testing.
+- [CONTRIBUTING.md](CONTRIBUTING.md) covers the ground rules for a pull request.
+
+## License
+
+MIT for the scripts, stylesheets, patches and tooling in this repository (see
+[LICENSE](LICENSE)). Upstream themes, extensions, icon/pointer packs and fonts
+keep their own licences. SF Pro is Apple's and is fetched from a third-party
+mirror only if you choose it.

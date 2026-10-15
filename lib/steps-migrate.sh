@@ -97,9 +97,10 @@ adopt_theme_dir() {
 }
 
 # True when the aura-glass config dir exists but has never really been used.
-# seed_glass_mode mkdir -p's modes/<mode>/ with no dry-run guard, so even
-# `--dry-run` on a legacy machine leaves a decoy behind. An empty backups/ is
-# the honest signal: nothing has installed through this directory yet.
+# Versions before the dry-run drawer fix (KI-08) let seed_glass_mode create
+# modes/<mode>/ even under `--dry-run`, so a legacy machine can still carry that
+# decoy. An empty backups/ is the honest signal: nothing has installed through
+# this directory yet.
 conf_is_decoy() {
     [ -d "$1" ] || return 0
     [ -z "$(ls -A "$1/backups" 2>/dev/null || true)" ]

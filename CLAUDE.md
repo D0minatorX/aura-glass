@@ -1,205 +1,164 @@
-# CLAUDE.md — working on aura-glass
+# CLAUDE.md: working on Aura Glass
 
-Instructions for an AI agent working in this repository. Read this before
-touching anything. `README.md` is the *user* document; this is the contributor
-one. Deeper detail lives in [docs/](docs/) — start at [docs/README.md](docs/README.md).
-
----
-
-## What this project is
-
-A GNOME desktop theme installed by a Bash script. There is no build system, no
-package, no test runner in the usual sense. `./install.sh` fetches pinned
-upstreams, copies stylesheets into `~/.config/aura-glass`, splices them into the
-theme's generated CSS, loads a dconf preset, and writes gsettings. Everything
-lands under `$HOME` except three optional root steps (dependencies, the
-`gnome-rounded-blur` library, the GDM login screen).
-
-Targets GNOME Shell 48 / 49 / 50 / 51, Wayland preferred. Arch/CachyOS, Fedora,
-Ubuntu/Debian.
+Instructions for an AI agent (or a new contributor) in this repository. Read
+this first. [README.md](README.md) is the user document. The long-form
+contributor docs start at [docs/README.md](docs/README.md).
 
 ---
 
-## The five rules that matter most
+## What this is, in one paragraph
 
-### 1. One place resolves a flag into a file
+Aura Glass is a frosted-glass desktop for **GNOME Shell 48–51**, delivered by a
+Bash installer rather than a package. `install.sh` fetches **pinned** upstreams
+(the GNOME-macOS-Tahoe theme, adopted as `Aura-Glass`, plus Blur My Shell v73
+with three patches and a patched Custom OSD). It copies `css/` into
+`~/.config/aura-glass`, rewrites those copies for the user's choices, splices
+them into four generated CSS files with `bin/aura-glass-apply`, loads dconf
+presets, writes gsettings, and installs a first-party extension (Aura Glass
+Helper), user services (icon sync, panel-blur fix, GDM sync, update check,
+adaptive performance) and a GTK settings app. Every choice is remembered as a
+memo, so a flagless re-run reproduces it. Two glass modes exist: **frosted** and
+**performance**. Adaptive performance is a transient overlay on frosted.
 
-The precedence chain is **typed flag → `--glass-mode` → per-mode memo →
-top-level `$CONF_DIR` memo → default**, and it is implemented exactly once, in
-`install.sh`'s resolution block plus the `apply_*` functions in
-[lib/steps-dconf.sh](lib/steps-dconf.sh) and [lib/steps-css.sh](lib/steps-css.sh).
+**The goal** is one consistent material across shell, GTK4 and GTK3 that stays
+consistent across every front end, re-run, mode switch, preview and adaptive
+transition, and that uninstalls cleanly. Most bugs are a breach of that
+consistency. See [docs/CONSISTENCY.md](docs/CONSISTENCY.md).
 
-The settings window, the setup wizard and `aura-glass-preview` all call *that*
-code rather than reimplementing it. Never add a second copy of a resolution
-rule. If a GUI needs to know a value before `install.sh` runs (radius bounds,
-preset rows), the duplication gets a checker — see rule 3.
+---
 
-### 2. Never edit `~/.themes` or `~/.config/gtk-*` by hand
+## Where to look
 
-Those four files are generated. `bin/aura-glass-apply` owns a single marked
-block in each:
+| Need | Go to |
+|---|---|
+| Which file draws X / owns setting Y | [docs/FEATURE-MAP.md](docs/FEATURE-MAP.md), **before** grepping |
+| Every file, install location, call graph, who writes what | [docs/STRUCTURE.md](docs/STRUCTURE.md) |
+| How a run works (precedence, modes, CSS pipeline, lock) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| A flag, memo, path, env var, key | [docs/CONFIG-REFERENCE.md](docs/CONFIG-REFERENCE.md) |
+| Bugs already found, with repros and fix directions | [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) |
+| How to fix a bug, recipes for changes | [docs/DEVELOPING.md](docs/DEVELOPING.md) |
+| Which checks exist and which are safe to run | [docs/TESTING.md](docs/TESTING.md) |
+| The two GTK windows | [docs/GUI.md](docs/GUI.md) |
 
 ```
-/* >>> aura-glass BEGIN <<< */ … /* >>> aura-glass END <<< */
+install.sh  uninstall.sh            entry points
+lib/        the steps (steps.sh first: pins, paths, extension arrays)
+tokens/     every number written twice
+css/        stylesheets, NN- prefix = cascade order
+dconf/      core.ini (BMS + Custom OSD), solid.ini (no-blur), extras.ini
+bin/        commands installed to ~/.local/bin
+gui/        setup wizard + settings app (front ends for flags)
+extensions/ Aura Glass Helper (window menu, D-Bus bridge, adaptive menu)
+systemd/    user units
+tools/      runtime helpers + hermetic checks + live-session tools (see rule 6)
 ```
 
-Edit `css/*.css` in the repo, then re-run the installer. Anything written
-outside that block is lost on the next apply and breaks uninstall.
+---
 
-### 3. Duplicated numbers are *checked*, never trusted
+## Rules
 
-Radii and blur sigmas appear literally in stylesheets, in `dconf/core.ini`, and
-in `gui/aura_glass_settings.py`. GTK4/St/GTK3 have no shared variable mechanism,
-so the duplication is unavoidable. [tokens/tokens.sh](tokens/tokens.sh) is the
-single source of truth and `tools/check-tokens.sh` fails the commit when a copy
-drifts. **Change a value in `tokens/tokens.sh`, then in every consumer its
-comment names, then run the checker.**
+### 1. One resolver
+
+Only `install.sh` (parse → resolution block) and the `apply_*`/`install_*`
+functions in `lib/` turn a flag into a file, key or memo. The settings app, both
+wizards, `aura-glass-preview`, the adaptive worker and the window menu all go
+through that code. Precedence is: **typed flag → `--glass-mode` → mode drawer
+`modes/<mode>/<key>` → top-level memo → default**. Never add a second copy. If a
+front end must know a value early (radius rows, bounds), duplicate it **and**
+add or extend a checker.
+
+### 2. Never hand-edit generated files
+
+`~/.themes/Aura-Glass/gnome-shell/gnome-shell.css`,
+`~/.config/gtk-4.0/gtk.css`, `gtk-dark.css` and `~/.config/gtk-3.0/gtk.css` are
+generated. `bin/aura-glass-apply` owns one
+`/* >>> aura-glass BEGIN <<< */ … END` block in each. Edit `css/` and re-apply.
+Never edit the installed copies in `~/.config/aura-glass/` either. They're
+recopied every run.
+
+### 3. Duplicated numbers are checked, not trusted
+
+`tokens/tokens.sh` is the source of truth for radii, sigmas and transparency.
+Change the token, then every consumer its comment names (FEATURE-MAP §8), then
+run `tools/check-tokens.sh` (plus `check-gui-radius.py` and
+`check-radius-preset.sh` for radii). A painted radius must equal the blur
+radius behind it.
 
 ### 4. Comments are the deliverable
 
-Almost every non-obvious number in `css/`, `dconf/` and `lib/` carries a comment
-saying *why it is that number* — usually the result of a bisection against a
-screenshot. Those comments are the most valuable thing in the repository. Do not
-strip them, do not shorten them, and when you change a value, update the reason
-too. If you cannot say why a number is what it is, do not change it.
+Non-obvious numbers in `css/`, `dconf/`, `lib/` and `tokens/` carry a comment
+saying **why** (usually a bisection against a screenshot). Don't strip or
+shorten them. Update the reason when you change the value. If you can't say
+why a number is what it is, don't change it.
 
-### 5. Apply theme edits to the live desktop
+### 5. A repo edit isn't a finished change
 
-A repo edit is not a finished change. After editing `css/`, `dconf/` or
-`tokens/`:
+After editing `css/`, `dconf/` or `tokens/`, the change has to reach the
+desktop: `./install.sh --settings-only -y` (offline, rootless, seconds). On the
+user's own machine you may run exactly that retune. **Don't** run a full
+install, `--force`, `uninstall.sh`, anything that needs `sudo`, or GDM steps
+unless the user asks. Remember that `core.ini` changes don't reach an existing
+install without `--force` (ARCHITECTURE §7).
 
-```bash
-./install.sh --settings-only -y
-```
+### 6. `tools/` holds three kinds of file, treated differently
 
-That reapplies the dconf preset, the CSS and the gsettings without touching the
-theme or extensions. No root, no network, a few seconds. GTK apps need a
-restart to pick up the GTK side; the shell reloads itself.
+- **Runtime helpers** (11): `rescale-transparency.py`, `apply-tint-color.py`, `apply-shell-tint.py`, `apply-notification-opacity.py`, `apply-radius-preset.py`, `apply-popup-brightness.py`, `token_manifest.py`, `moga_cursor.py`, `aura_glass_operation.py`, `aura_glass_panel_blur.py`, `aura_glass_adaptive.py`. These are **part of the theme**. `lib/` and `bin/` call them. Don't move or rename one without updating every caller, and don't add new ones unless asked.
+- **Hermetic checks** (`check-*` except the live ones below). Fixture `HOME`, temp dirs, stubs, `--dry-run`. **Agents may run these.**
+- **Live-session tools.** Agents **never** run these: `preview.sh`, `preview-session.sh`, `preview-shot.py`, `preview-extensions.py`, `preview-driver/`, `gpu-live.sh`, `gpu-sample.py`, `check-preview.sh`, `check-shots.py`, `check-moga-cursors.sh` (it reads the real `HOME`).
+- **Don't create new files in `tools/`** (new checks, new scripts) unless the user asks for them.
 
----
+### 7. Keep every path consistent
 
-## Repository map
+Any change to a setting must hold on every path that can reach it: CLI,
+`--incremental` (the settings app's Apply), a mode switch on an **existing**
+install, the settings app's re-read, both wizards, the preview, adaptive
+active/restore, and uninstall. Walk the checklist in
+[docs/CONSISTENCY.md](docs/CONSISTENCY.md) §4. Key sub-rules:
 
-| Path | What it is |
-|---|---|
-| `install.sh` | Entry point: flag parsing, precedence resolution, step orchestration |
-| `uninstall.sh` | Restoration, in four scopes (base / `--extensions` / `--assets` / `--gdm`) |
-| `lib/` | The steps, split by concern. Definitions only — nothing runs at source time |
-| `tokens/tokens.sh` | Single source of truth for every value written down twice |
-| `css/` | Stylesheets. Numeric prefix **is** the cascade order |
-| `dconf/` | `core.ini` (every extension's settings), `extras.ini`, `solid.ini` |
-| `patches/` | Pinned-upstream patches (GNOME 50 compat, Blur My Shell behaviour) |
-| `bin/` | User-facing commands installed into `~/.local/bin` |
-| `gui/` | GTK4/libadwaita settings window and setup wizard (optional) |
-| `extensions/` | The one first-party GNOME extension (`aura-glass-blur@aura-glass.local`) |
-| `systemd/` | Four user units: icon sync, panel blur fix, GDM sync, update check |
-| `tools/` | Checkers, the headless preview harness, the git hooks |
-| `docs/` | Contributor documentation (this file's long form) |
+- **Readers read where the resolver reads**, with the same missing-memo defaults.
+- **Wizard parity.** The GTK wizard and the text wizard in `install.sh` ask the same questions with the same options and recommendations.
+- Every memo write is under `remembering()`. Every project writer holds the `aura-glass-operation` lock.
+- Everything installed is uninstalled.
 
-`lib/` breakdown:
+### 8. Stay in scope
 
-```
-steps.sh              upstream pins, paths, extension arrays, preflight, install_theme, finish
-steps-migrate.sh      moving a pre-rename (tahoe-glass) install onto current names
-steps-extensions.sh   EGO downloads, the three pinned builds, gnome-rounded-blur
-steps-assets.sh       icon and cursor packs
-steps-fonts.sh        --font: Inter, MiSans, SF Pro
-steps-modes.sh        the three glass modes and their per-mode memo drawers
-steps-css.sh          stylesheet install, tint/opacity/radius rewriters, density
-steps-dconf.sh        the dconf preset and every apply_* that writes a key
-steps-integration.sh  icon-sync agent, Flatpak override, panel blur unit
-steps-gdm.sh          login screen theme and monitor sync
-steps-gui.sh          settings window, update-check timer
-steps-wizard.sh       runs the GTK setup wizard, reads its flags back
-common.sh             output helpers, run/dry-run, backups, pinned fetchers
-distro.sh             distro detection, dependency install, AUR helper bootstrap
-```
+Do what was asked. No unrequested validation, defensive branches,
+refactors or "while I was here" edits. This codebase is deliberate, and most
+oddities have a comment above them explaining why. Read it before "fixing"
+it. If you disagree with a recorded decision, say so instead of changing it
+silently.
+
+### 9. No AI attribution
+
+No `Co-Authored-By` trailers, "generated with" footers or assistant mentions in
+commits, tags or releases. Commit subjects follow
+`type(scope): lower-case sentence, no trailing period`.
 
 ---
 
+## Fixing a bug
 
+1. Check [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md). It may already be diagnosed.
+2. Identify the **path** that produced the bad state (table in [docs/DEVELOPING.md](docs/DEVELOPING.md)) and its **owner** (FEATURE-MAP, STRUCTURE §4).
+3. Reproduce off the desktop where possible (fixture `HOME` + stubs, as the checks do).
+4. Fix at the owner, not the symptom. Keep the "why" comments true.
+5. Run the hermetic checks for the area. Ask the user to verify live (or run the retune from rule 5).
+6. Update KNOWN-ISSUES (move the entry to **Fixed**) and any doc the fix made wrong.
 
-## Conventions
+## Bash and Python conventions
 
-**Commits.** Conventional-commit prefixes with a scope:
-`feat(gui): …`, `fix(solid): …`, `docs: …`. Subject line is a sentence, lower
-case, no trailing period. Do **not** add `Co-Authored-By` trailers, "Generated
-with" footers, or any mention of an AI assistant to commits, tags or releases in
-this repository.
+- Bash: `set -euo pipefail`. Mutations go through `run`, overwrites through `backup_once`, memos through `remembering`, output through `step/info/ok/warn/skip/die`.
+- Python: standard library + PyGObject (the settings app also uses pycairo). `gui/` never writes theme files.
+- New code writes only the `aura-glass` names. Legacy `tahoe-glass` read paths stay.
 
-**Branches and releases.** Feature branch → `git merge --no-ff` into `main` →
-tag `vX.Y.Z` → `gh release create`. There is no VERSION file; the git tag *is*
-the version, and `bin/aura-glass-update-check` reads it. See
-[docs/RELEASING.md](docs/RELEASING.md).
+## Things that look like bugs and aren't
 
-**Scope.** Do what was asked. Do not add validation, checks, defensive branches
-or "while I was here" refactors that were not requested. This codebase is
-deliberate; unrequested additions cost more to review than they save.
-
-**Bash.** `set -euo pipefail`. Every filesystem mutation goes through `run`, so
-`--dry-run` stays honest. Every overwrite goes through `backup_once`, so
-uninstall stays complete. Every memo write is guarded by `remembering`, so a dry
-run and a live preview leave nothing behind.
-
-**Python.** Standard library plus PyGObject only. The GUI may not import
-anything `lib/distro.sh` does not probe for. `gui/` never writes theme files —
-it composes a command line and runs `install.sh --settings-only`.
-
-**Tools.** Do not create new tools or scripts in `tools/`, and do not use or invoke `tools/` from the theme installer, `lib/`, `bin/`, or anywhere in the theme runtime. Never run `.sh` scripts in `tools/`. All theme behavior and asset management must live directly in Bash (`install.sh`, `lib/`) or native theme configuration.
-
----
-
-## Common tasks
-
-### Add a new flag
-
-1. Declare its variable and `_EXPLICIT` twin at the top of `install.sh`.
-2. Parse it in the `case` block.
-3. Resolve it in the precedence block: flag → memo → default.
-4. Write the memo in the `apply_*` that consumes it, guarded by `remembering`.
-5. Document it in `README.md`'s options table.
-6. If the GUI or wizard should offer it, add it to **both** windows *and* to
-   `install.sh`'s terminal wizard — parity is enforced by comment, not by code.
-7. Run `check-gui-flags.py` and `check-wizard-flags.py`.
-
-### Add or change a stylesheet
-
-1. Name it `shell-NN-*.css` or `gtk4-NN-*.css`. The prefix is its cascade
-   position and is load-bearing — later sheets are meant to win on equal
-   specificity.
-2. Add it to the matching `SHELL_SNIPPETS` / `GTK4_SNIPPETS` array in
-   `bin/aura-glass-apply`, at the position its cascade needs.
-3. `install_css` in `lib/steps-css.sh` globs the numbered sheets; an optional
-   sheet (installed or removed by flag) needs its own branch there.
-4. Test on the live desktop with `./install.sh --settings-only -y`.
-
-### Change a radius or a blur sigma
-
-1. Edit `tokens/tokens.sh`.
-2. Edit every consumer its comment names.
-3. If it is a radius, update the preset rows *and* `RADIUS_PRESET_ROWS` /
-   bounds in `gui/aura_glass_settings.py`.
-4. Apply with `./install.sh --settings-only -y` and verify visually on the live desktop.
-
-### Add an extension
-
-Add the UUID to `EXT_EXTRA_RECOMMENDED` / `EXT_EXTRA_ALL` in `lib/steps.sh`,
-give it an `ext_description` — the settings window builds its list from
-`aura-glass-ext list`, so an undescribed UUID is an empty row.
-
----
-
-## Things that look like bugs and are not
-
-- **Values duplicated between CSS and dconf.** Deliberate; see rule 3.
-- **No custom accent hex.** `-st-accent-color` is a read-only St keyword backed
-  by a nine-value C enum. A hex would recolour every app window and none of the
-  shell. Long version in `tokens/tokens.sh`.
-- **`pill` still accepted as a `--radius-preset`.** Retired name, resolved to
-  `rounded`, because machines still hold a memo saying `pill`.
-- **`--no-blur` ≠ `--glass-mode solid`.** The first is an opaque *themed*
-  desktop. The second stands the whole theme down, settings intact.
-- **The GUI passes only changed flags.** Anything untouched is resolved by the
-  installer, which is the point.
-- **Sheets copied to `$CONF_DIR` even in solid mode.** They cost nothing while
-  nothing splices them, and it makes the way back one run.
+- **Values duplicated between CSS, dconf and the GUI.** Deliberate (rule 3), and checked.
+- **No custom accent hex.** `-st-accent-color` is a read-only St keyword. A hex would recolour apps but not the shell.
+- **`pill` accepted as a radius preset.** A retired name, mapped to `rounded` for old memos.
+- **The settings app sends only changed flags.** The installer resolves the rest. That's the point.
+- **Sheets copied to `$CONF_DIR` even when unused.** Cheap, and it makes switching back one run.
+- **`load_dconf` skips `core.ini` on an existing install.** It preserves the user's extension settings. Use `--force` to reload. But see KI-03 for what that does to mode switches.
+- **`refresh_bms_after_dconf` does nothing on GNOME ≥ 51.** Disabling Blur My Shell live segfaults Mutter there. The adaptive path turns pipelines off instead of disabling the extension, for the same reason.
+- **Every full apply writes `color-scheme=prefer-dark`.** The theme is dark-only, so a retune deliberately puts dark back over a light choice (KI-16, by design).
+- **Legacy `solid`/`styling-off` code.** It's the way back for installs from the three-mode era (KI-15).

@@ -86,6 +86,9 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gtk
+# The settings window draws its radius previews with pycairo, which Debian and
+# openSUSE ship apart from PyGObject. Without it the window dies at import.
+import cairo
 PY
 }
 
@@ -93,8 +96,8 @@ PY
 # prints and the step that offers to run it.
 GUI_TOOLKIT_PKGS_ARCH="python-gobject libadwaita"
 GUI_TOOLKIT_PKGS_FEDORA="python3-gobject libadwaita"
-GUI_TOOLKIT_PKGS_DEBIAN="python3-gi gir1.2-adw-1"
-GUI_TOOLKIT_PKGS_SUSE="python3-gobject typelib-1_0-Adw-1"
+GUI_TOOLKIT_PKGS_DEBIAN="python3-gi python3-gi-cairo gir1.2-adw-1"
+GUI_TOOLKIT_PKGS_SUSE="python3-gobject python3-gobject-cairo typelib-1_0-Adw-1"
 
 # Printed as a suggestion — never run. install_gui uses this, because by the time
 # it runs the install is already under way and the window it wants is optional.

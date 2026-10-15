@@ -113,7 +113,14 @@ remember_glass_mode() {
 # live state — install_transparency_css, apply_app_tint_color and the settings
 # window all read those, and none of them learn about modes — so these are an
 # archive that the mode switch restores from, not a second source of truth.
-mode_memo_path() { printf '%s/modes/%s/%s\n' "$CONF_DIR" "${GLASS_MODE:-frosted}" "$1"; }
+#
+# MODES_ROOT is where the drawers live: $CONF_DIR/modes, except on a dry run.
+# A dry run has to resolve exactly as the real run would, and that resolution
+# reads the drawer seed_glass_mode writes — so instead of skipping the seed,
+# install.sh points this at a scratch copy that is thrown away on exit. Same
+# answers, nothing left in $CONF_DIR (KI-08).
+modes_root() { printf '%s\n' "${MODES_ROOT:-$CONF_DIR/modes}"; }
+mode_memo_path() { printf '%s/%s/%s\n' "$(modes_root)" "${GLASS_MODE:-frosted}" "$1"; }
 
 mode_memo_read() {   # KEY DEFAULT
     local f; f="$(mode_memo_path "$1")"
@@ -122,7 +129,7 @@ mode_memo_read() {   # KEY DEFAULT
 }
 
 mode_memo_write() {  # KEY VALUE
-    mkdir -p "$CONF_DIR/modes/${GLASS_MODE:-frosted}"
+    mkdir -p "$(modes_root)/${GLASS_MODE:-frosted}"
     printf '%s\n' "$2" > "$(mode_memo_path "$1")"
 }
 
@@ -133,12 +140,12 @@ mode_memo_write() {  # KEY VALUE
 # window the wallpaper is what the text sits on, so it starts darker, and a
 # level of 0 is not a state this mode has.
 seed_glass_mode() {
-    local dir="$CONF_DIR/modes/${GLASS_MODE:-frosted}"
+    local dir; dir="$(modes_root)/${GLASS_MODE:-frosted}"
     [ -d "$dir" ] && return 0
     mkdir -p "$dir"
 
     local disk_level disk_app disk_shell disk_strength disk_scope disk_popup disk_notification
-    local disk_brightness disk_ground
+    local disk_brightness disk_win_brightness disk_ground
     disk_level="$(cat "$CONF_DIR/app-transparency" 2>/dev/null || true)"
     disk_app="$(cat "$CONF_DIR/app-tint-color" 2>/dev/null || true)"
     disk_shell="$(cat "$CONF_DIR/shell-tint-color" 2>/dev/null || true)"
@@ -147,6 +154,7 @@ seed_glass_mode() {
     disk_popup="$(cat "$CONF_DIR/popup-blur" 2>/dev/null || true)"
     disk_notification="$(cat "$CONF_DIR/notification-blur" 2>/dev/null || true)"
     disk_brightness="$(cat "$CONF_DIR/popup-brightness" 2>/dev/null || true)"
+    disk_win_brightness="$(cat "$CONF_DIR/window-brightness" 2>/dev/null || true)"
     disk_ground="$(cat "$CONF_DIR/notification-opacity" 2>/dev/null || true)"
 
     if [ "${GLASS_MODE:-}" = performance ]; then
@@ -158,14 +166,22 @@ seed_glass_mode() {
         mode_memo_write notification-blur "0"
         mode_memo_write blur-strength    "100"
         mode_memo_write popup-brightness "115"
+        mode_memo_write window-brightness "100"
         mode_memo_write notification-opacity "40"
     else
-        mode_memo_write app-transparency "${disk_level:-0}"
+        # With no memo to inherit, the same level install.sh's own resolution
+        # falls back to — 0.95 without window blur, 0.90 with it. Seeding 0
+        # here made a fresh `--glass-mode frosted` come out opaque while a
+        # flagless run on the same machine came out at 0.90.
+        local fresh_level=0.90
+        [ "${WANT_WINDOW_BLUR:-1}" = 0 ] && fresh_level=0.95
+        mode_memo_write app-transparency "${disk_level:-$fresh_level}"
         mode_memo_write app-tint-color   "${disk_app:-#000000}"
         mode_memo_write shell-tint-color "${disk_shell:-#000000}"
-        mode_memo_write app-blur-scope   "${disk_scope:-gtk}"
+        mode_memo_write app-blur-scope   "${disk_scope:-all}"
         mode_memo_write blur-strength    "${disk_strength:-100}"
         mode_memo_write popup-brightness "${disk_brightness:-115}"
+        mode_memo_write window-brightness "${disk_win_brightness:-100}"
         mode_memo_write notification-opacity "${disk_ground:-40}"
         mode_memo_write popup-blur       "${disk_popup:-1}"
         mode_memo_write notification-blur "${disk_notification:-1}"
@@ -186,7 +202,7 @@ load_glass_mode_memos() {
     case "$level" in
         0|0.[0-9][0-9]|1.00) ;;
         *) warn "$(mode_memo_path app-transparency) holds '$level' — reseeding this mode"
-           rm -rf "$CONF_DIR/modes/$GLASS_MODE"
+           rm -rf "$(modes_root)/$GLASS_MODE"
            seed_glass_mode ;;
     esac
 
@@ -210,6 +226,8 @@ load_glass_mode_memos() {
             || BLUR_STRENGTH="$(mode_memo_read blur-strength 100)"
         [ -n "${POPUP_BRIGHTNESS_EXPLICIT:-}" ] || [ -n "${POPUP_BRIGHTNESS:-}" ] \
             || POPUP_BRIGHTNESS="$(mode_memo_read popup-brightness 115)"
+        [ -n "${WINDOW_BRIGHTNESS_EXPLICIT:-}" ] || [ -n "${WINDOW_BRIGHTNESS:-}" ] \
+            || WINDOW_BRIGHTNESS="$(mode_memo_read window-brightness 100)"
         [ -n "${NOTIFICATION_OPACITY_EXPLICIT:-}" ] || [ -n "${NOTIFICATION_OPACITY:-}" ] \
             || NOTIFICATION_OPACITY="$(mode_memo_read notification-opacity 40)"
         if [ -z "${POPUP_BLUR_EXPLICIT:-}" ]; then
@@ -221,7 +239,7 @@ load_glass_mode_memos() {
             NOTIFICATION_BLUR_EXPLICIT=1
         fi
         if [ -z "${APP_BLUR_SCOPE_EXPLICIT:-}" ]; then
-            APP_BLUR_SCOPE="$(mode_memo_read app-blur-scope gtk)"
+            APP_BLUR_SCOPE="$(mode_memo_read app-blur-scope all)"
             APP_BLUR_SCOPE_EXPLICIT=1
         fi
     fi
@@ -240,10 +258,11 @@ save_glass_mode_memos() {
     else
         mode_memo_write blur-strength    "${BLUR_STRENGTH:-100}"
         mode_memo_write popup-brightness "${POPUP_BRIGHTNESS:-115}"
+        mode_memo_write window-brightness "${WINDOW_BRIGHTNESS:-100}"
         mode_memo_write notification-opacity "${NOTIFICATION_OPACITY:-40}"
         mode_memo_write popup-blur       "${WANT_POPUP_BLUR:-1}"
         mode_memo_write notification-blur "${WANT_NOTIFICATION_BLUR:-1}"
-        mode_memo_write app-blur-scope   "${APP_BLUR_SCOPE:-gtk}"
+        mode_memo_write app-blur-scope   "${APP_BLUR_SCOPE:-all}"
     fi
     return 0
 }

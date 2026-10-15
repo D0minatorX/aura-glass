@@ -91,8 +91,8 @@ index eda61e2..670f742 100644
 -            && ((enable_all && !matchesAnyPattern(window_wm_class, this._compiled_blacklist))
 -                || (!enable_all && matchesAnyPattern(window_wm_class, this._compiled_whitelist))
 +            window_classes.length > 0
-+            && ((enable_all && !matchesAnyClass(window_classes, this._compiled_blacklist))
-+                || (!enable_all && matchesAnyClass(window_classes, this._compiled_whitelist))
++            && (matchesAnyClass(window_classes, this._compiled_whitelist)
++                || (enable_all && !matchesAnyClass(window_classes, this._compiled_blacklist))
              )
              && [
                  Meta.FrameType.NORMAL,

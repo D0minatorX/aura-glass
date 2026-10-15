@@ -419,6 +419,8 @@ step "Removing aura-glass itself"
 run rm -f "$HOME/.local/bin/aura-glass-apply" "$HOME/.local/bin/aura-glass-icon-sync" \
           "$HOME/.local/bin/aura-glass-panel-blur" "$HOME/.local/bin/aura-glass-gdm-sync" \
           "$HOME/.local/bin/aura-glass-adaptive" \
+          "$HOME/.local/bin/aura-glass-operation" \
+          "$HOME/.local/bin/aura-glass-preview" \
           "$HOME/.local/bin/aura-glass-settings" \
           "$HOME/.local/bin/aura-glass-open-once" \
           "$HOME/.local/bin/tahoe-glass-apply" "$HOME/.local/bin/tahoe-glass-icon-sync" \

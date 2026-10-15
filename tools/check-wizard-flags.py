@@ -84,7 +84,7 @@ def answers(**kw):
 # The font rides with the accent because to_argv states both on every run, and
 # it is second because that is the order to_argv writes them in.
 BASE = ["--accent", "purple", "--font", "system"]
-FROSTED = ["--gtk-apps-blur", "--app-transparency", "0.90", "--popup-blur"]
+FROSTED = ["--all-apps-blur", "--app-transparency", "0.90", "--popup-blur"]
 # The wizard's recommended pair, which is not install.sh's flagless default —
 # the wizard states its answer on every run rather than leaving the packs to the
 # installer, so these are the two names the defaults case has to send. The size
@@ -125,8 +125,8 @@ CASES = [
      BASE + ["--no-blur", "--no-icons", "--cursors", "moga", "--cursor-size",
              "20", "--osd"]),
 
-    ("every window blurred", answers(scope="all"), False,
-     BASE + ["--all-apps-blur", "--app-transparency", "0.90", "--popup-blur"]
+    ("gtk windows blurred", answers(scope="gtk"), False,
+     BASE + ["--gtk-apps-blur", "--app-transparency", "0.90", "--popup-blur"]
      + PACKS),
 
     # The transparency has to follow the scope flag rather than precede it:
@@ -137,11 +137,11 @@ CASES = [
      + PACKS),
 
     ("flat popups", answers(popup_blur=False), False,
-     BASE + ["--gtk-apps-blur", "--app-transparency", "0.90", "--no-popup-blur"]
+     BASE + ["--all-apps-blur", "--app-transparency", "0.90", "--no-popup-blur"]
      + PACKS),
 
     ("deeper glass", answers(transparency="0.82"), False,
-     BASE + ["--gtk-apps-blur", "--app-transparency", "0.82", "--popup-blur"]
+     BASE + ["--all-apps-blur", "--app-transparency", "0.82", "--popup-blur"]
      + PACKS),
 
     ("hatter icons and mactahoe pointers",

@@ -10,6 +10,63 @@
 #
 # Sourced by install.sh.
 
+# The keys a glass mode owns are exactly the ones dconf/solid.ini sets: every
+# Blur My Shell component's blur switch, its hacks level and the OSD alpha.
+# A fresh install gets them from loading the preset, but an existing install
+# skips the preset to keep the user's own extension settings — so on that path
+# a mode switch used to move only the three components an apply_* below owns
+# (popup, notification, applications) and leave the panel, overview, folders,
+# lock screen, window list, screenshot and dock in the previous mode.
+#
+# Prints "section/key<TAB>value" for each owned key: solid.ini's value when
+# blur is off, core.ini's value for the same key when it is on.
+mode_owned_dconf_keys() {
+    python3 - "$REPO_ROOT/dconf/solid.ini" "$REPO_ROOT/dconf/core.ini" "$1" <<'PY'
+import configparser
+import sys
+
+
+def load(path):
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str
+    parser.read(path, encoding="utf-8")
+    return parser
+
+
+solid, core, blur = load(sys.argv[1]), load(sys.argv[2]), sys.argv[3]
+for section in solid.sections():
+    for key, value in solid.items(section):
+        if blur == "1":
+            if not core.has_option(section, key):
+                continue
+            value = core.get(section, key)
+        print("%s/%s\t%s" % (section, key, value))
+PY
+}
+
+# Performance always gets its keys — they are the mode's whole promise of no
+# blur cost, and a user's own blur settings have nothing to say while blur is
+# off. Frosted gets core.ini's values back only on the way in from another
+# mode, so a per-component choice made inside frosted (say, no lock screen
+# blur) survives an ordinary retune.
+sync_mode_owned_keys() {
+    local want="${WANT_BLUR:-1}" previous target key value
+    previous="$(cat "$CONF_DIR/glass-mode" 2>/dev/null || true)"
+    target="$(glass_mode_from_state)"
+    if [ "$want" = 1 ] && [ "${previous:-frosted}" = "$target" ]; then
+        return 0
+    fi
+    while IFS="$(printf '\t')" read -r key value; do
+        [ -n "$key" ] || continue
+        run dconf write "/org/gnome/shell/extensions/$key" "$value"
+    done < <(mode_owned_dconf_keys "$want")
+    if [ "$want" = 1 ]; then
+        ok "frosted mode's blur components restored from the preset"
+    else
+        ok "every blur component off for performance mode"
+    fi
+}
+
 load_dconf() {
     step "Loading the dconf preset"
 
@@ -29,6 +86,7 @@ load_dconf() {
 
     if [ "$is_update" = 1 ] && [ "$has_core_dconf" = 1 ] && [ "${FORCE:-0}" != 1 ]; then
         ok "existing extension settings preserved (theme update)"
+        sync_mode_owned_keys
     else
         if [ "${DRY_RUN:-0}" = 1 ]; then
             info "dry-run: dconf load /org/gnome/shell/extensions/ < dconf/core.ini"
@@ -64,6 +122,7 @@ load_dconf() {
     apply_grain
     apply_blur_strength
     apply_popup_brightness
+    apply_window_brightness
     apply_popup_blur
     apply_notification_blur
     apply_app_blur
@@ -401,7 +460,7 @@ print("[%s]" % ", ".join(gvariant(l) for l in lines if l))'
 apply_app_blur() {
     local base=/org/gnome/shell/extensions/blur-my-shell
     local want="${WANT_WINDOW_BLUR:-1}" memo="$CONF_DIR/window-blur"
-    local scope="${APP_BLUR_SCOPE:-gtk}" scope_memo="$CONF_DIR/app-blur-scope"
+    local scope="${APP_BLUR_SCOPE:-all}" scope_memo="$CONF_DIR/app-blur-scope"
     local allow_memo="$CONF_DIR/app-blur-allow" block_memo="$CONF_DIR/app-blur-block"
 
     if [ "${WANT_BLUR:-1}" != 1 ]; then
@@ -417,7 +476,7 @@ apply_app_blur() {
 
     if [ -z "${APP_BLUR_SCOPE_EXPLICIT:-}" ] && [ -r "$scope_memo" ]; then
         scope="$(cat "$scope_memo" 2>/dev/null || true)"
-        scope="${scope:-gtk}"
+        scope="${scope:-all}"
     fi
 
     if remembering; then
@@ -731,6 +790,61 @@ apply_popup_brightness() {
     ok "popup blur lit at ${want}% (remembered for later runs)"
 }
 
+WINDOW_BRIGHTNESS_MIN=50
+WINDOW_BRIGHTNESS_MAX=150
+
+apply_window_brightness() {
+    local want="${WINDOW_BRIGHTNESS:-}" memo="$CONF_DIR/window-brightness"
+    if [ -z "$want" ] && [ -f "$memo" ]; then
+        want="$(cat "$memo" 2>/dev/null || true)"
+    fi
+    [ -n "$want" ] || return 0
+
+    case "$want" in
+        ''|*[!0-9]*) warn "--window-brightness wants a whole percentage, got '$want'"
+                     return 0 ;;
+    esac
+    if [ "$want" -lt "$WINDOW_BRIGHTNESS_MIN" ] || [ "$want" -gt "$WINDOW_BRIGHTNESS_MAX" ]; then
+        warn "--window-brightness $want is outside ${WINDOW_BRIGHTNESS_MIN}-${WINDOW_BRIGHTNESS_MAX} — leaving the window blur alone"
+        return 0
+    fi
+
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+        info "dry-run: light the window blur at ${want}%"
+        return 0
+    fi
+
+    local base=/org/gnome/shell/extensions/blur-my-shell
+    run dconf write "$base/applications/brightness" \
+        "$(awk -v p="$want" 'BEGIN { printf "%.2f", p / 100 }')"
+
+    python3 - "$want" <<'PY' || { warn "could not light the window blur"; return 0; }
+import re, subprocess, sys
+want = int(sys.argv[1]) / 100.0
+BASE = "/org/gnome/shell/extensions/blur-my-shell"
+pipe_name = subprocess.run(["dconf", "read", BASE + "/applications/pipeline"],
+                           capture_output=True, text=True).stdout.strip().strip("'")
+blob = subprocess.run(["dconf", "read", BASE + "/pipelines"],
+                      capture_output=True, text=True).stdout.strip()
+if pipe_name and blob and pipe_name in blob:
+    start = blob.index(pipe_name)
+    nxt = blob.find("'pipeline_", start + len(pipe_name))
+    end = nxt if nxt != -1 else len(blob)
+    sliced = re.sub(r"('brightness': <)([0-9.]+)(>)",
+                    lambda m: "%s%s%s" % (m.group(1), repr(want), m.group(3)),
+                    blob[start:end])
+    new = blob[:start] + sliced + blob[end:]
+    if new != blob:
+        subprocess.run(["dconf", "write", BASE + "/pipelines", new], check=True)
+PY
+
+    if remembering; then
+        mkdir -p "$CONF_DIR"
+        printf '%s\n' "$want" > "$memo"
+    fi
+    ok "window blur lit at ${want}% (remembered for later runs)"
+}
+
 BLUR_STRENGTH_MIN=25
 BLUR_STRENGTH_MAX=200
 
@@ -870,14 +984,14 @@ apply_adaptive_blur() {
     fi
     normal_mode="${normal_mode:-frosted}"
 
+    # The baseline is the mode itself: performance is the no-blur mode, and
+    # solid the legacy one. Nothing records a separate "blur" memo — reading
+    # one here meant the guard never fired, and a restore in performance mode
+    # removed shell-80-solid.css and switched app blur back on.
     local normal_blur=1
-    if [ "$normal_mode" = solid ]; then
-        normal_blur=0
-    elif [ -r "$CONF_DIR/modes/$normal_mode/blur" ]; then
-        normal_blur="$(cat "$CONF_DIR/modes/$normal_mode/blur" 2>/dev/null || echo 1)"
-    elif [ -r "$CONF_DIR/blur" ]; then
-        normal_blur="$(cat "$CONF_DIR/blur" 2>/dev/null || echo 1)"
-    fi
+    case "$normal_mode" in
+        performance|solid) normal_blur=0 ;;
+    esac
 
     if [ "$normal_blur" = 0 ]; then
         skip "baseline is already no-blur — skipping adaptive transition"
@@ -934,13 +1048,11 @@ apply_adaptive_blur() {
                 perf_shell="$(cat "$CONF_DIR/modes/performance/shell-tint-color" 2>/dev/null || echo '#000000')"
             fi
             if [ "$perf_level" = "1.00" ] || [ "$perf_level" = "1" ] || [ "$perf_level" = "0" ] || [ "$perf_level" = "0.0" ]; then
-                perf_opacity=255
                 run rm -f "$CONF_DIR/gtk4-transparency.css"
             else
-                perf_opacity="$(python3 -c "print(round(float('$perf_level') * 255))" 2>/dev/null || echo 255)"
                 APP_TRANSPARENCY="$perf_level" APP_TINT_COLOR="$perf_app" install_transparency_css
             fi
-            run dconf write "$base/applications/opacity" "$perf_opacity"
+            run dconf write "$base/applications/opacity" 255
             run dconf write "$base/popup/blur" false
             run rm -f "$CONF_DIR/shell-popup-blur.css"
             run dconf write "$base/popup/notification" false
@@ -1000,9 +1112,10 @@ apply_adaptive_blur() {
                 frost_level="$(cat "$mode_dir/app-transparency" 2>/dev/null || echo 0.90)"
                 frost_app="$(cat "$mode_dir/app-tint-color" 2>/dev/null || echo '#000000')"
                 frost_shell="$(cat "$mode_dir/shell-tint-color" 2>/dev/null || echo '#000000')"
-                frost_scope="$(cat "$mode_dir/app-blur-scope" 2>/dev/null || echo gtk)"
+                frost_scope="$(cat "$mode_dir/app-blur-scope" 2>/dev/null || echo all)"
                 frost_strength="$(cat "$mode_dir/blur-strength" 2>/dev/null || echo 100)"
                 frost_brightness="$(cat "$mode_dir/popup-brightness" 2>/dev/null || echo 115)"
+                frost_win_brightness="$(cat "$mode_dir/window-brightness" 2>/dev/null || echo 100)"
                 frost_ground="$(cat "$mode_dir/notification-opacity" 2>/dev/null || echo 40)"
                 frost_popup="$(cat "$mode_dir/popup-blur" 2>/dev/null || echo 1)"
                 frost_notif="$(cat "$mode_dir/notification-blur" 2>/dev/null || echo 1)"
@@ -1010,9 +1123,10 @@ apply_adaptive_blur() {
                 [ -r "$CONF_DIR/app-transparency" ] && frost_level="$(cat "$CONF_DIR/app-transparency" 2>/dev/null || echo 0.90)"
                 [ -r "$CONF_DIR/app-tint-color" ] && frost_app="$(cat "$CONF_DIR/app-tint-color" 2>/dev/null || echo '#000000')"
                 [ -r "$CONF_DIR/shell-tint-color" ] && frost_shell="$(cat "$CONF_DIR/shell-tint-color" 2>/dev/null || echo '#000000')"
-                [ -r "$CONF_DIR/app-blur-scope" ] && frost_scope="$(cat "$CONF_DIR/app-blur-scope" 2>/dev/null || echo gtk)"
+                [ -r "$CONF_DIR/app-blur-scope" ] && frost_scope="$(cat "$CONF_DIR/app-blur-scope" 2>/dev/null || echo all)"
                 [ -r "$CONF_DIR/blur-strength" ] && frost_strength="$(cat "$CONF_DIR/blur-strength" 2>/dev/null || echo 100)"
                 [ -r "$CONF_DIR/popup-brightness" ] && frost_brightness="$(cat "$CONF_DIR/popup-brightness" 2>/dev/null || echo 115)"
+                [ -r "$CONF_DIR/window-brightness" ] && frost_win_brightness="$(cat "$CONF_DIR/window-brightness" 2>/dev/null || echo 100)"
                 [ -r "$CONF_DIR/notification-opacity" ] && frost_ground="$(cat "$CONF_DIR/notification-opacity" 2>/dev/null || echo 40)"
                 [ -r "$CONF_DIR/popup-blur" ] && frost_popup="$(cat "$CONF_DIR/popup-blur" 2>/dev/null || echo 1)"
                 [ -r "$CONF_DIR/notification-blur" ] && frost_notif="$(cat "$CONF_DIR/notification-blur" 2>/dev/null || echo 1)"
@@ -1030,6 +1144,7 @@ apply_adaptive_blur() {
             WANT_NOTIFICATION_BLUR="$frost_notif" NOTIFICATION_BLUR_EXPLICIT=1 apply_notification_blur
             BLUR_STRENGTH="$frost_strength" BLUR_STRENGTH_EXPLICIT=1 apply_blur_strength
             POPUP_BRIGHTNESS="$frost_brightness" POPUP_BRIGHTNESS_EXPLICIT=1 apply_popup_brightness
+            WINDOW_BRIGHTNESS="${frost_win_brightness:-100}" WINDOW_BRIGHTNESS_EXPLICIT=1 apply_window_brightness
             NOTIFICATION_OPACITY="$frost_ground" NOTIFICATION_OPACITY_EXPLICIT=1 apply_notification_opacity
 
             run rm -f "$CONF_DIR/shell-80-solid.css"
@@ -1273,6 +1388,12 @@ apply_gsettings() {
     # theme is ours, and in solid mode it goes back to GNOME's default along
     # with the shell theme — that pair is what makes a stood-down desktop look
     # like one, rather than a themed desktop with the blur removed.
+    #
+    # Written on every full run and full retune, not only the first install,
+    # and on purpose (KI-16, decided 2026-10-15): the theme is dark-only — every
+    # sheet, tint and the frosted ladder are tuned against a dark ground — so a
+    # light color-scheme under it is a broken look, not a preference the theme
+    # can honour. A retune is the way back to the look as designed.
     run gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
     apply_accent
     if [ "${WANT_STYLING:-1}" = 1 ]; then

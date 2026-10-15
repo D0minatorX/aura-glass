@@ -339,7 +339,7 @@ install_rounded_blur() {
         return 0
     fi
 
-    if gjs -c 'const Blur = imports.gi.Blur; void Blur.BlurEffect;' >/dev/null 2>&1 && [ "${FORCE:-0}" != 1 ]; then
+    if LD_LIBRARY_PATH="/usr/lib/mutter-$GNOME_MAJOR:/usr/lib/mutter-18:$HOME/.local/lib:${LD_LIBRARY_PATH:-}" gjs -c 'const Blur = imports.gi.Blur; void Blur.BlurEffect;' >/dev/null 2>&1 && [ "${FORCE:-0}" != 1 ]; then
         skip "gnome-rounded-blur already installed and functional"
         rounded_blur_stamp
         return 0
@@ -353,9 +353,6 @@ install_rounded_blur() {
     if have gcc && have pkg-config; then
         local src="$SRC_CACHE/gnome-rounded-blur"
         clone_pinned "$ROUNDEDBLUR_REPO" "$ROUNDEDBLUR_REF" "$src"
-        if [ -f "$REPO_ROOT/patches/gnome-rounded-blur-mutter51.patch" ]; then
-            git -C "$src" apply --whitespace=nowarn "$REPO_ROOT/patches/gnome-rounded-blur-mutter51.patch" 2>/dev/null || true
-        fi
         mkdir -p "$HOME/.local/lib" "$HOME/.local/share/girepository-1.0"
         local mutter_cflags_libs
         mutter_cflags_libs="$(pkg-config --cflags --libs "mutter-clutter-$GNOME_MAJOR" "mutter-cogl-$GNOME_MAJOR" "libmutter-$GNOME_MAJOR" 2>/dev/null || pkg-config --cflags --libs mutter-clutter-18 mutter-cogl-18 libmutter-18 2>/dev/null || true)"

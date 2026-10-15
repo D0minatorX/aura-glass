@@ -31,6 +31,8 @@ def main():
         assert plan(temp, "--accent", "teal")["actions"] == ["accent"]
         assert plan(temp, "--cursor-size", "32")["actions"] == ["cursor-size"]
         assert plan(temp, "--app-tint-color", "#101820")["actions"] == ["css"]
+        assert plan(temp, "--app-transparency", "0.82")["actions"] == ["css", "app-opacity"]
+        assert plan(temp, "--no-app-transparency")["actions"] == ["css", "app-opacity"]
         assert plan(temp, "--radius-preset", "soft")["actions"] == ["full"]
     print("check-incremental-apply: OK")
 

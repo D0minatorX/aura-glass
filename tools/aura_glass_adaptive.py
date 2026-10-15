@@ -144,6 +144,11 @@ def styling_enabled(directory):
     return not os.path.exists(os.path.join(directory, "styling-off"))
 
 
+def performance_mode(directory):
+    """Performance is already the no-blur mode, so there is nothing to adapt."""
+    return read_text(os.path.join(directory, "glass-mode")) == "performance"
+
+
 def installer(directory, action):
     script = read_text(os.path.join(directory, "adaptive-install"))
     if not script:
@@ -259,7 +264,7 @@ class AdaptiveReducer:
 def sample(reducer, directory, force=False):
     # The profile menu stays available in solid mode, but when styling has stood down,
     # the worker does not make transient changes.
-    if not styling_enabled(directory):
+    if not styling_enabled(directory) or performance_mode(directory):
         return False
     profile = selected_profile(directory)
     fullscreen_now, focused_wm_class = focus_state()

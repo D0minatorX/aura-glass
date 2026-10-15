@@ -521,24 +521,38 @@ export default class AuraGlassBlurExtension extends Extension {
             // whole chain, so a dialog shows checked when the app it belongs
             // to is blurred, matching what check_blur itself now does in
             // Blur My Shell.
-            const scope = this._settings.get_boolean('enable-all') ? 'all' : 'gtk';
-            const key = scope === 'all' ? 'blacklist' : 'whitelist';
-            const covered = matchesAnyClass(this._settings.get_strv(key), classes);
-            const checked = scope === 'all' ? !covered : covered;
+            const enableAll = this._settings.get_boolean('enable-all');
+            const inWhitelist = matchesAnyClass(this._settings.get_strv('whitelist'), classes);
+            const inBlacklist = matchesAnyClass(this._settings.get_strv('blacklist'), classes);
+            const checked = inWhitelist || (enableAll && !inBlacklist);
 
             item.setOrnament(checked ? PopupMenu.Ornament.CHECK
                                       : PopupMenu.Ornament.NONE);
             item.connect('activate', () => {
-                this._toggleBlur(wmClass, !checked, item);
+                this._toggleBlur(wmClass, classes, !checked, item);
             });
         }
     }
 
-    _toggleBlur(wmClass, wantBlurred, item) {
+    _toggleBlur(wmClass, classes, wantBlurred, item) {
         // A lock wait must never run on GNOME Shell's main loop. The backend
         // reads the current memo after it owns that lock, changes both lists
         // through apply_app_blur, and reports any wildcard it had to remove.
         // Until that succeeds the checkmark stays truthful about live state.
+        //
+        // The window menu is destroyed when it closes, which is usually long
+        // before the backend answers. Touching the item after that logs a
+        // "has been already disposed" stack trace into the journal, so every
+        // write to it below goes through this guard. The notifications still
+        // go out: they are the only feedback once the menu is gone.
+        let destroyed = false;
+        item.connect('destroy', () => {
+            destroyed = true;
+        });
+        const setSensitive = sensitive => {
+            if (!destroyed)
+                item.setSensitive(sensitive);
+        };
         item.setSensitive(false);
         const local = GLib.build_filenamev([
             GLib.get_home_dir(), '.local', 'bin', 'aura-glass-operation']);
@@ -551,7 +565,7 @@ export default class AuraGlassBlurExtension extends Extension {
                     wantBlurred ? '1' : '0'],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
         } catch (error) {
-            item.setSensitive(true);
+            setSensitive(true);
             Main.notify('aura-glass', `${_('Could not change app blur')}: ${error.message}`);
             return;
         }
@@ -560,24 +574,28 @@ export default class AuraGlassBlurExtension extends Extension {
             try {
                 [ok, _stdout, stderr] = source.communicate_utf8_finish(result);
             } catch (error) {
-                item.setSensitive(true);
+                setSensitive(true);
                 Main.notify('aura-glass', `${_('Could not change app blur')}: ${error.message}`);
                 return;
             }
             if (!ok || !source.get_successful()) {
-                item.setSensitive(true);
+                setSensitive(true);
                 Main.notify('aura-glass', `${_('Could not change app blur')}: ${stderr?.trim() || _('operation failed')}`);
                 return;
             }
             // The backend, rather than the menu's old pre-lock list, is now
             // authoritative. Read it only after success so a failed command
-            // can never leave a false checkmark behind.
-            const scope = this._settings.get_boolean('enable-all') ? 'all' : 'gtk';
-            const key = scope === 'all' ? 'blacklist' : 'whitelist';
-            const covered = matchesAny(this._settings.get_strv(key), wmClass);
-            item.setOrnament((scope === 'all' ? !covered : covered)
-                ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
-            item.setSensitive(true);
+            // can never leave a false checkmark behind. Same rule and same
+            // class chain as the menu builds its checkmark from above, so a
+            // reopened menu never disagrees with this one.
+            if (!destroyed) {
+                const enableAll = this._settings.get_boolean('enable-all');
+                const inWhitelist = matchesAnyClass(this._settings.get_strv('whitelist'), classes);
+                const inBlacklist = matchesAnyClass(this._settings.get_strv('blacklist'), classes);
+                item.setOrnament(inWhitelist || (enableAll && !inBlacklist)
+                    ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+                item.setSensitive(true);
+            }
             for (const line of (stderr || '').split('\n')) {
                 const match = /^aura-glass-app-blur-wildcard: (always-blur|never-blur): (.+)$/.exec(line);
                 if (match) {

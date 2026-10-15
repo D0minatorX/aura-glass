@@ -60,7 +60,7 @@ BMS_SUBWIN_PATCH="blur-my-shell-subwindows.patch"
 BMS_NOTIF_PATCH="blur-my-shell-notifications.patch"
 
 ROUNDEDBLUR_REPO="https://github.com/kancko/gnome-rounded-blur.git"
-ROUNDEDBLUR_REF="9c7efb7ac5de"    # v1.0.1
+ROUNDEDBLUR_REF="a4db9e5947b1"    # v1.0.2
 
 # For ensure_aur_helper in lib/distro.sh. Unpinned, unlike everything else
 # here: an AUR PKGBUILD's checksums point at a specific upstream release

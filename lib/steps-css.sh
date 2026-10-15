@@ -519,7 +519,7 @@ install_css() {
             "$HOME/.local/bin/aura-glass-operation" 755
         install_if_changed "$REPO_ROOT/bin/aura-glass-apply" \
             "$HOME/.local/bin/aura-glass-apply" 755
-        ln -sf "$HOME/.local/bin/aura-glass-apply" \
+        run ln -sf "$HOME/.local/bin/aura-glass-apply" \
             "$HOME/.local/bin/tahoe-glass-apply" 2>/dev/null || true
     fi
 

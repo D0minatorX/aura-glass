@@ -19,8 +19,15 @@ select_apply_actions() {
             --cursor-size|--cursor-size=*) _apply_add cursor-size ;;
             --cursors|--cursors=*|--no-cursors) _apply_add cursor-theme ;;
             --window-buttons|--window-buttons=*) _apply_add window-buttons ;;
+            --window-brightness|--window-brightness=*|--app-brightness|--app-brightness=*) _apply_add window-brightness ;;
             --app-blur-allow|--app-blur-allow=*|--app-blur-block|--app-blur-block=*) _apply_add app-blur ;;
-            --app-tint-color|--app-tint-color=*|--shell-tint-color|--shell-tint-color=*|--app-transparency|--app-transparency=*|--no-app-transparency|--notification-opacity|--notification-opacity=*|--titlebar-button-style|--titlebar-button-style=*) _apply_add css ;;
+            # The level is written twice: the GTK stylesheet's alpha (css) and
+            # Blur My Shell's window actor opacity, which is all a browser or
+            # Electron window has. Classed as css alone, a slider move rewrote
+            # the sheet and left the actor at its old value, so Chrome stopped
+            # showing the blur while GTK apps still did.
+            --app-transparency|--app-transparency=*|--no-app-transparency) _apply_add css; _apply_add app-opacity ;;
+            --app-tint-color|--app-tint-color=*|--shell-tint-color|--shell-tint-color=*|--notification-opacity|--notification-opacity=*|--titlebar-button-style|--titlebar-button-style=*) _apply_add css ;;
             *) APPLY_FALLBACK_REASON="unclassified flag: $flag"; APPLY_ACTIONS=(full); return ;;
         esac
     done
