@@ -139,6 +139,7 @@ WANT_GUI=1
 WANT_WINDOW_MENU=1
 WANT_UPDATE_CHECK=1
 UPDATE_CHECK_EXPLICIT=""
+UPDATE_CHANNEL=""
 ASSUME_YES=0
 DRY_RUN=0
 FORCE=0
@@ -291,6 +292,10 @@ ${C_BLD}aura-glass${C_OFF} — a fluid frosted-glass desktop for GNOME 48-51
     --no-update-check skip the daily check for a newer release. The check asks
                       the git remote for its tags and notifies once per release;
                       it never installs anything on its own
+    --update-channel release|latest
+                      what the update check follows on main: release tags
+                      (default), or every commit, with a release still announced
+                      as one. Remembered
     --no-icons        leave the icon theme alone, and keep leaving it alone
     --no-cursors      leave the cursor theme alone, and keep leaving it alone
     --settings-only   retune an existing install and nothing else: reapply the
@@ -418,6 +423,12 @@ parse_flags() {
         --no-window-menu) WANT_WINDOW_MENU=0; EXPLICIT_FLAGS=1; shift ;;
         --update-check)  WANT_UPDATE_CHECK=1; UPDATE_CHECK_EXPLICIT=1; EXPLICIT_FLAGS=1; shift ;;
         --no-update-check) WANT_UPDATE_CHECK=0; UPDATE_CHECK_EXPLICIT=1; EXPLICIT_FLAGS=1; shift ;;
+        --update-channel)
+            case "${2:-}" in
+                release|latest) UPDATE_CHANNEL="$2" ;;
+                *) die "--update-channel takes release or latest" ;;
+            esac
+            EXPLICIT_FLAGS=1; shift 2 ;;
         --no-icons)      WANT_ICONS=0; EXPLICIT_FLAGS=1; shift ;;
         --no-cursors)    WANT_CURSORS=0; EXPLICIT_FLAGS=1; shift ;;
         --no-wm-buttons|--wm-buttons) # Deprecated, and a no-op. --window-buttons

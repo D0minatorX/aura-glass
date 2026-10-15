@@ -24,6 +24,13 @@
 # than only for GitHub. Nothing is fetched into the checkout — this never touches
 # the working tree.
 #
+# A checkout on main can also opt in to following commits instead of tags, with
+# the update-channel memo ("latest", set by --update-channel latest or the
+# settings window). main is then compared commit-for-commit like a test branch,
+# and a newer release tag on the remote still gets its own "release is
+# available" notification, so a big release is never lost among the commits.
+# Absent or anything else is "release", the tag line above.
+#
 # The answer is left in $CONF_DIR/update-available, holding the version, so the
 # settings window can show it without going to the network itself. Absent means
 # up to date.
@@ -49,8 +56,20 @@ up_to_date() {
 
 branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 
+channel="$(cat "$CONF_DIR/update-channel" 2>/dev/null || true)"
+
+# Which line is followed: tags, or commits. Only main and master have a choice;
+# a detached HEAD has no branch to follow and any other branch has no tags of its
+# own, so those two are not up to the memo.
+line=tags
 case "$branch" in
-main|master|HEAD|"")
+main|master) [ "$channel" = latest ] && line=commits ;;
+HEAD|"") ;;
+*) line=commits ;;
+esac
+
+case "$line" in
+tags)
     # A detached HEAD lands here rather than in the branch case below because
     # there is no branch to follow the commits of. It is the checkout a release
     # tag was checked out into, so the tag is still the right question to ask.
@@ -89,7 +108,7 @@ main|master|HEAD|"")
     headline="Aura Glass $remote_version is available"
     body="You have $local_version. Open Aura Glass settings to install it."
     ;;
-*)
+commits)
     local_sha="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
     if [ -z "$local_sha" ]; then
         echo "aura-glass-update-check: $branch has no commits" >&2
@@ -129,8 +148,28 @@ main|master|HEAD|"")
         up_to_date "$local_version"
     fi
 
-    headline="A new Aura Glass test build is available"
-    body="$branch has moved on since $local_version. Open Aura Glass settings to install it."
+    case "$branch" in
+    main|master)
+        headline="Aura Glass has new changes"
+        body="$branch has moved on since $local_version. Open Aura Glass settings to install it."
+        # A release cut since this checkout's own newest tag is the news worth
+        # leading with, so it takes the headline and the commits ride along.
+        tag_local="$(git -C "$REPO" describe --tags --abbrev=0 2>/dev/null || true)"
+        tag_remote="$(
+            git -C "$REPO" ls-remote --tags --refs origin 2>/dev/null \
+                | sed -n 's#.*refs/tags/\(v[0-9][0-9.]*\(-beta\)\?\)$#\1#p' \
+                | sort -V | tail -n 1
+        )"
+        if [ -n "$tag_local" ] && [ -n "$tag_remote" ] && [ "$tag_local" != "$tag_remote" ] \
+            && [ "$(printf '%s\n%s\n' "$tag_local" "$tag_remote" | sort -V | tail -n 1)" = "$tag_remote" ]; then
+            headline="Aura Glass $tag_remote is available"
+        fi
+        ;;
+    *)
+        headline="A new Aura Glass test build is available"
+        body="$branch has moved on since $local_version. Open Aura Glass settings to install it."
+        ;;
+    esac
     ;;
 esac
 

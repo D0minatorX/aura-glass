@@ -195,6 +195,13 @@ install_update_check() {
     if [ "${DRY_RUN:-0}" != 1 ]; then
         mkdir -p "$CONF_DIR"
         printf '%s\n' "$want" > "$memo"
+        # release unless asked, and kept like the switch above so a flagless
+        # re-run does not undo a choice made in the settings window.
+        local channel="${UPDATE_CHANNEL:-}"
+        if [ -z "$channel" ]; then
+            channel="$(cat "$CONF_DIR/update-channel" 2>/dev/null || true)"
+        fi
+        printf '%s\n' "${channel:-release}" > "$CONF_DIR/update-channel"
     fi
 
     if [ "$want" != 1 ]; then

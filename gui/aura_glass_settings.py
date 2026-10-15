@@ -472,6 +472,13 @@ CURSOR_SIZE_GNOME = 24
 # "system" is not a font. It puts the three keys back to what they held before
 # aura-glass first ran, which is what makes this row an undo rather than a
 # fourth opinion. install.sh's apply_font is where that happens.
+UPDATE_CHANNELS = [
+    ("release", "Releases",
+     "Notify when a new tagged release is out"),
+    ("latest", "Latest commits",
+     "Follow main commit by commit; a tagged release is still announced"),
+]
+
 FONTS = [
     ("system", "System default",
      "GNOME's own font, left alone — and what the other three revert to"),
@@ -619,6 +626,7 @@ FLAG_LABELS = {
     "--titlebar-button-style": ("appearance", "Titlebar button style"),
     "--update-check": ("updates", "Daily update check"),
     "--no-update-check": ("updates", "Daily update check"),
+    "--update-channel": ("updates", "Update channel"),
     "--panel-blur-fix": ("system", "Panel blur fix"),
     "--no-panel-blur-fix": ("system", "Panel blur fix"),
     "--radius-preset": ("radius", "Corner rounding"),
@@ -2025,6 +2033,20 @@ def is_test_build(repo):
     return branch is not None and branch not in RELEASE_BRANCHES
 
 
+def follows_commits(repo):
+    """Whether the update check compares commits rather than release tags.
+
+    A branch other than main always does. main does when the update-channel memo
+    says latest, the same rule bin/aura-glass-update-check applies.
+    """
+    branch = current_branch(repo)
+    if branch is None:
+        return False
+    if branch not in RELEASE_BRANCHES:
+        return True
+    return read_memo("update-channel", "release") == "latest"
+
+
 def installed_version(repo):
     """What is installed, in the terms its own line is measured in.
 
@@ -2036,7 +2058,7 @@ def installed_version(repo):
     if not repo:
         return None
     branch = current_branch(repo)
-    if branch is None or branch in RELEASE_BRANCHES:
+    if not follows_commits(repo):
         return git_out(repo, "describe", "--tags", "--abbrev=0")
     short = git_out(repo, "rev-parse", "--short=7", "HEAD")
     return "%s@%s" % (branch, short) if short else None
@@ -2234,6 +2256,9 @@ class Settings:
             "panel-blur-fix", "1" if monitor_count() > 1 else "0") != "0"
 
         self.update_check = read_memo("update-check", "1") != "0"
+        self.update_channel = read_memo("update-channel", "release")
+        if self.update_channel not in [c[0] for c in UPDATE_CHANNELS]:
+            self.update_channel = "release"
         # Written by bin/aura-glass-update-check, so the window can say what is
         # waiting without going to the network itself. None means up to date.
         self.update_available = read_memo("update-available") or None
@@ -2376,6 +2401,8 @@ class Settings:
         if self.update_check != other.update_check:
             args.append("--update-check" if self.update_check
                         else "--no-update-check")
+        if self.update_channel != other.update_channel:
+            args += ["--update-channel", self.update_channel]
         if self.panel_blur_fix != other.panel_blur_fix:
             args.append("--panel-blur-fix" if self.panel_blur_fix
                         else "--no-panel-blur-fix")
@@ -6347,6 +6374,11 @@ class Window(Adw.ApplicationWindow):
         self._update_check_row.connect("notify::active", self._on_changed,
                                        "update_check")
         updates.add(self._update_check_row)
+
+        self._update_channel_row = self._combo(
+            "Update channel", "", UPDATE_CHANNELS,
+            self._applied.update_channel, "update_channel")
+        updates.add(self._update_channel_row)
         page.add(updates)
 
         repair = Adw.PreferencesGroup(
@@ -6487,6 +6519,8 @@ class Window(Adw.ApplicationWindow):
         s.cursors = self._cursors_row._ids[self._cursors_row.get_selected()]
         s.cursor_size = int(self._cursor_size_row.get_value())
         s.font = self._font_row._ids[self._font_row.get_selected()]
+        s.update_channel = self._update_channel_row._ids[
+            self._update_channel_row.get_selected()]
         s.window_buttons = self._window_buttons_row._ids[
             self._window_buttons_row.get_selected()]
         s.titlebutton_style = self._titlebutton_style_row._ids[
@@ -6708,6 +6742,8 @@ class Window(Adw.ApplicationWindow):
             self._applied.titlebutton_style, "titlebutton_style")
         self._panel_blur_row.set_active(self._applied.panel_blur_fix)
         self._update_check_row.set_active(self._applied.update_check)
+        self._update_channel_row.set_selected(
+            self._update_channel_row._ids.index(self._applied.update_channel))
         self._loading = False
         self._rebuild_app_list()
         self._sync_sensitivity()
@@ -6733,6 +6769,12 @@ class Window(Adw.ApplicationWindow):
                 "rather than which releases exist. To go back to releases, run "
                 "git checkout main in the checkout once the branch has been "
                 "merged." % current_branch(self._repo))
+        elif follows_commits(self._repo):
+            self._version_row.set_title("Latest commits")
+            self._updates_group.set_description(
+                "The check asks the git remote whether main has new commits, "
+                "and still announces a new release when one is tagged. It "
+                "never installs anything on its own.")
         else:
             self._version_row.set_title("Version")
             self._updates_group.set_description(

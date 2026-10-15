@@ -53,6 +53,7 @@ attaches `aura-glass-vX.Y.Z.tar.gz` and `.zip` (`git archive` of the tag). The
 | Checkout | Reported version | Question asked of the remote (`git ls-remote`) |
 |---|---|---|
 | `main`, `master`, detached HEAD | nearest tag | is there a newer release tag? |
+| `main`, `master` with `update-channel` = `latest` | `main@shortsha` | has `main` moved? A newer release tag still takes the notification headline |
 | any other branch | `branch@shortsha` | has the branch moved? |
 
 The two programs that decide this (`aura-glass-update-check`, and

@@ -48,6 +48,7 @@ implementation view.
 | `--gui` / `--no-gui` | on | none | settings window (needs PyGObject, libadwaita, pycairo) |
 | `--window-menu` / `--no-window-menu` | on | none | "Blur This App" |
 | `--update-check` / `--no-update-check` | on | `update-check` | daily timer |
+| `--update-channel release\|latest` | `release` | `update-channel` | what the check follows on `main`: tags, or commits (a new release is still announced) |
 | `--panel-blur-fix` / `--no-panel-blur-fix` | on if >1 monitor | `panel-blur-fix` | panel blur rebuild service |
 | `--gdm` / `--no-gdm`, `--gdm-background PATH` | off | `gdm-installed` | root |
 | `--gdm-monitors` (`--sync-monitors`) / `--no-gdm-monitors` | off | `gdm-monitors-synced` | root |
@@ -181,6 +182,7 @@ what the old solid mode switched off.
 | `repo-path` | the checkout the GUI, preview, update check and worker run from. **Only written when the GUI is installed** | `install_gui` |
 | `apply-source-fingerprint` | sha256 of the apply sources | `--incremental` full fallback |
 | `panel-blur-fix`, `update-check` | `0\|1` | `install_panel_blur_unit`, `install_update_check` |
+| `update-channel` | `release\|latest` | `install_update_check` |
 | `update-available` | the version a check found | `aura-glass-update-check` |
 | `rounded-blur` | build stamp | `rounded_blur_stamp` |
 | `bms-ref`, `bms-source` | installed BMS commit and `git\|ego` | `install_bms` |

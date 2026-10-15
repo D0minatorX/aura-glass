@@ -68,6 +68,7 @@ def state(**kw):
     s.titlebutton_style = kw.get("titlebutton_style", "minimal")
     s.panel_blur_fix = kw.get("panel_blur_fix", True)
     s.update_check = kw.get("update_check", True)
+    s.update_channel = kw.get("update_channel", "release")
     s.update_available = kw.get("update_available", None)
 
     # Every mode's drawer, seeded exactly as seed_glass_mode seeds a fresh
@@ -404,6 +405,8 @@ CASES = [
 
     ("turn the daily update check off", FROSTED, state(update_check=False),
      ["--no-update-check"]),
+    ("follow main commits for updates", FROSTED, state(update_channel="latest"),
+     ["--update-channel", "latest"]),
 
     # A pending update is a fact about the remote, not a setting — it must never
     # turn into a flag, or opening the window during a release would start
