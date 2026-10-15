@@ -6304,8 +6304,9 @@ class Window(Adw.ApplicationWindow):
 
         reapply_row = Adw.ActionRow(
             title="Reapply settings",
-            subtitle="Reapplies saved dconf, CSS and GNOME settings without "
-                     "reinstalling the theme or extension packages")
+            subtitle="Reapplies saved dconf, CSS and GNOME settings in a "
+                     "terminal so prompts remain usable, without reinstalling "
+                     "the theme or extension packages")
         self._repair_reapply = Gtk.Button(label="Reapply",
                                           valign=Gtk.Align.CENTER,
                                           sensitive=self._repo is not None)
@@ -6707,7 +6708,7 @@ class Window(Adw.ApplicationWindow):
             self._update_button.set_sensitive(False)
         elif pending:
             self._update_button_row.set_subtitle(
-                "Pulls %s and runs the full installer" % pending)
+                "Pulls %s and runs the full installer in a terminal" % pending)
             self._update_button.set_sensitive(not self._running)
 
     def _on_check_updates(self, _button):
@@ -6748,6 +6749,18 @@ class Window(Adw.ApplicationWindow):
         proc.wait_async(None, done)
 
     def _on_install_update(self, _button):
+        if self._running:
+            self._toasts.add_toast(Adw.Toast(
+                title="Another installer operation is already running"))
+            return
+        if self._repo is None:
+            self._banner_missing_repo()
+            return
+        if self._preview_active or self._preview_proc is not None or \
+                self._preview_timer or self._preview_terminal_requested:
+            self._toasts.add_toast(Adw.Toast(
+                title="Apply or revert the live preview before updating"))
+            return
         blockers = update_blockers(self._repo)
         if blockers:
             self._sync_updates()
@@ -6761,71 +6774,21 @@ class Window(Adw.ApplicationWindow):
         # The full installer, not --settings-only: a release can bump the
         # upstream theme ref, add an extension or add a stylesheet, and none of
         # those reach the desktop through the settings-only path.
+        #
+        # Run in a real terminal so prompts (git auth, sudo, log out) remain
+        # fully interactive and usable.
         script = ("set -e\n"
                   "git -C %s pull --ff-only\n"
-                  "bash %s --yes\n"
+                  "bash %s --gui\n"
                   % (GLib.shell_quote(self._repo),
                      GLib.shell_quote(os.path.join(self._repo, "install.sh"))))
 
-        if is_test_build(self._repo):
-            doing = ("Pulling the newest commit on %s, then running the "
-                     "installer" % current_branch(self._repo))
-        else:
-            doing = "Pulling the new release, then running the installer"
-
-        self._update_log_group.set_visible(True)
-        self._update_log.get_buffer().set_text("")
-        self._update_button.set_sensitive(False)
-        self._update_text.set_label("Updating…")
-        self._update_spinner.set_visible(True)
-        self._update_button_row.set_subtitle(doing)
-        # The same interlock _run_started keeps, from the other side: this runs
-        # the full installer, and Apply must not start a second one over it.
-        self._running = True
-        self._apply.set_sensitive(False)
-        self._reapply.set_sensitive(False)
-        self._repair_reapply.set_sensitive(False)
-        self._repair_full.set_sensitive(False)
-        self._apply_status.set_label("%s…" % doing)
-        log_append(self._update_log, "$ git pull --ff-only && install.sh --yes")
-
-        def done(ok, message):
-            self._update_spinner.set_visible(False)
-            self._update_text.set_label("Install")
-            self._running = False
-            self._reapply.set_sensitive(True)
-            self._repair_reapply.set_sensitive(self._repo is not None)
-            self._repair_full.set_sensitive(self._repo is not None)
-            # Whatever happened, Apply goes back to answering for itself — a
-            # failed update must not leave it stuck off.
-            self._mark_dirty()
+        if self.run_in_terminal(script, "Theme update"):
+            self._update_button_row.set_subtitle(
+                "Theme update opened in a terminal — follow its progress there")
+            self._apply_status.remove_css_class("error")
             self._apply_status.set_label(
-                "Updated — log out and back in to finish" if ok
-                else "The update failed — see the log on the Updates page")
-            if not ok:
-                log_append(self._update_log, "")
-                log_append(self._update_log, "Failed: %s" % message)
-                # From disk rather than assumed: a pull that landed and an
-                # installer that then failed is still a checkout that moved,
-                # and the row has to say which version is there now.
-                self._applied = Settings()
-                self._sync_updates()
-                self._toasts.add_toast(Adw.Toast(
-                    title="The update failed — see the log below"))
-                return
-            log_append(self._update_log, "")
-            log_append(self._update_log,
-                       "Done — log out and back in to finish.")
-            self._applied = Settings()
-            self._reload()
-            self._sync_updates()
-            self._toasts.add_toast(Adw.Toast(
-                title="Updated — log out and back in to finish"))
-
-        stream_command(["bash", "-c", script], self._update_log_line, done)
-
-    def _update_log_line(self, line):
-        log_append(self._update_log, line)
+                "Theme update opened in a terminal — follow its progress there")
 
     def _on_reapply_settings(self, _button):
         if self._running:
@@ -6841,27 +6804,12 @@ class Window(Adw.ApplicationWindow):
                 title="Apply or revert the live preview before repairing"))
             return
 
-        argv = ["bash", os.path.join(self._repo, "install.sh"),
-                "--settings-only", "-y"]
-        self._run_started("Reapplying the saved settings…")
-        log_append(self._apply_log, "$ install.sh --settings-only -y")
-
-        def done(ok, message):
-            if not ok:
-                failed = "Reapply settings failed"
-                if message:
-                    failed = "%s — %s" % (failed, message)
-                self._run_finished(False, failed)
-                self._toasts.add_toast(Adw.Toast(
-                    title="Could not reapply settings — see the details"))
-                return
-            self._applied = Settings()
-            self._reload()
-            said = self._applied_message()
-            self._run_finished(True, said)
-            self._toasts.add_toast(Adw.Toast(title="Settings reapplied"))
-
-        stream_command(argv, self._run_line, done)
+        cmd = self._install_cmd("--settings-only")
+        if self.run_in_terminal(cmd, "Reapply settings"):
+            self._apply_status.remove_css_class("error")
+            self._apply_status.set_label(
+                "Reapply settings opened in a terminal — follow its progress "
+                "there")
 
     def _on_full_reinstall(self, _button):
         if self._running:
@@ -6915,12 +6863,7 @@ class Window(Adw.ApplicationWindow):
         return path if os.path.exists(path) else None
 
     def _on_reapply(self, _button):
-        """Run aura-glass-apply, the same command a shell would.
-
-        Through the bottom bar rather than a modal, the same way an extension
-        switch runs: it is a second or two of output that belongs in the log
-        already sitting there, not a window in front of the page.
-        """
+        """Run aura-glass-apply in a real terminal window."""
         if self._running:
             self._toasts.add_toast(Adw.Toast(
                 title="Already applying something — try again in a moment"))
@@ -6939,25 +6882,12 @@ class Window(Adw.ApplicationWindow):
                       "is gone"))
             return
 
-        self._run_started("Re-applying the CSS to the theme…")
-        log_append(self._apply_log, "$ aura-glass-apply --force-reload")
-
-        def done(ok, message):
-            if not ok:
-                failed = "aura-glass-apply failed"
-                if message:
-                    failed = "%s — %s" % (failed, message)
-                self._run_finished(False, failed)
-                self._toasts.add_toast(Adw.Toast(title=failed))
-                return
-            # GTK read ~/.config/gtk-4.0/gtk.css at startup and will not read
-            # it again, so this window would show every re-applied change but
-            # its own. The same reload the preview does, for the same reason.
+        cmd = "bash %s " "--force-reload" % GLib.shell_quote(script)
+        if self.run_in_terminal(cmd, "Reapply CSS"):
+            self._apply_status.remove_css_class("error")
+            self._apply_status.set_label(
+                "Reapply CSS opened in a terminal — follow its progress there")
             self._reload_preview_css()
-            self._run_finished(True, "CSS re-applied to the theme")
-            self._toasts.add_toast(Adw.Toast(title="CSS re-applied"))
-
-        stream_command(["bash", script, "--force-reload"], self._run_line, done)
 
     def _on_apply(self, _button):
         args = self._current().flags_against(self._applied)
