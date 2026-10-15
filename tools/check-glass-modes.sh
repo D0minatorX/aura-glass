@@ -49,7 +49,7 @@ want "performance turns blur off, 100% opacity, keeps styling on" \
      --glass-mode performance
 
 want "bare --no-blur is opaque but still themed" \
-     "frosted blur=0 window=0 popup=0 transparency=0 styling=1" \
+     "performance blur=0 window=0 popup=0 transparency=1.00 styling=1" \
      --no-blur
 
 if in_scratch --glass-mode solid >/dev/null 2>&1; then

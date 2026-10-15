@@ -947,8 +947,11 @@ apply_adaptive_blur() {
             run rm -f "$CONF_DIR/shell-notification-blur.css"
             run install -Dm644 "$REPO_ROOT/css/shell-80-solid.css" "$CONF_DIR/shell-80-solid.css"
             SHELL_TINT_COLOR="$perf_shell" apply_shell_tint_color
+            # Adaptive transitions are transient: update generated CSS on disk but
+            # skip reloading the GNOME Shell theme to prevent actor destruction, layout
+            # allocation errors, and multi-monitor 4K blur recompilation thrash.
             if [ -x "$apply_cmd" ]; then
-                "$apply_cmd" | sed 's/^/    /'
+                "$apply_cmd" --no-shell-reload | sed 's/^/    /'
             fi
             ok "adaptive no-blur state active (transient)"
             ;;
@@ -1047,8 +1050,11 @@ apply_adaptive_blur() {
             fi
 
             APP_TRANSPARENCY="$frost_level" APP_TINT_COLOR="$frost_app" install_transparency_css
+            # Adaptive transitions are transient: update generated CSS on disk but
+            # skip reloading the GNOME Shell theme to prevent actor destruction, layout
+            # allocation errors, and multi-monitor 4K blur recompilation thrash.
             if [ -x "$apply_cmd" ]; then
-                "$apply_cmd" | sed 's/^/    /'
+                "$apply_cmd" --no-shell-reload | sed 's/^/    /'
             fi
             ok "normal blur configuration restored"
             ;;

@@ -14,10 +14,12 @@ fi
 
 JSON_OUTPUT=0
 FORCE_RELOAD=0
+NO_SHELL_RELOAD=0
 for arg in "$@"; do
     case "$arg" in
         --json) JSON_OUTPUT=1 ;;
         --force-reload) FORCE_RELOAD=1 ;;
+        --no-shell-reload) NO_SHELL_RELOAD=1 ;;
         *) printf 'aura-glass-apply: unknown option: %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
@@ -498,7 +500,9 @@ apply "$GTK3_CSS"      0 "$DIR/gtk3-tweaks.css" \
 # so toggle the key to force Main.loadTheme().
 SD="$HOME/.local/share/gnome-shell/extensions/user-theme@gnome-shell-extensions.gcampax.github.com/schemas"
 [ -d "$SD" ] || SD="/usr/share/gnome-shell/extensions/user-theme@gnome-shell-extensions.gcampax.github.com/schemas"
-if { [ "$SHELL_TARGET_CHANGED" = 1 ] || [ "$FORCE_RELOAD" = 1 ]; } && [ ! -d "$SD" ]; then
+if [ "$NO_SHELL_RELOAD" = 1 ]; then
+    SHELL_RELOAD="skipped"
+elif { [ "$SHELL_TARGET_CHANGED" = 1 ] || [ "$FORCE_RELOAD" = 1 ]; } && [ ! -d "$SD" ]; then
     SHELL_RELOAD="unavailable"
 elif { [ "$SHELL_TARGET_CHANGED" = 1 ] || [ "$FORCE_RELOAD" = 1 ]; } && [ -d "$SD" ]; then
     cur=$(GSETTINGS_SCHEMA_DIR="$SD" gsettings get org.gnome.shell.extensions.user-theme name 2>/dev/null || echo "''")

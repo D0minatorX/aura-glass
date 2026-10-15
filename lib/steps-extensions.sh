@@ -539,6 +539,17 @@ refresh_bms_after_dconf() {
         return 0
     fi
 
+    # In GNOME Shell 51+, dynamically disabling Blur My Shell while actors are live
+    # causes Mutter/Clutter to segfault in clutter_actor_meta_get_actor during
+    # actor disposal, crashing the compositor and killing the session.
+    # Pipelines are updated live via dconf without unloading the extension.
+    local major="${GNOME_MAJOR:-}"
+    [ -n "$major" ] || major="$(gnome_major 2>/dev/null || echo 0)"
+    if [ "$major" -ge 51 ]; then
+        ok "$BMS_UUID refreshed after loading its pipelines"
+        return 0
+    fi
+
     if ! run gnome-extensions disable "$BMS_UUID" 2>/dev/null; then
         warn "could not refresh active $BMS_UUID after loading its pipelines"
         return 0

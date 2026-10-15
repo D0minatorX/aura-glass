@@ -91,6 +91,12 @@ def check_quiet_reapply_and_gtk_only_reload():
         forced = run(env, "--force-reload")
         assert forced["changed_targets"] == []
         assert forced["shell_reload"] == "reloaded"
+        forced_reloads = reload_count(log)
+        write(os.path.join(config, "shell-00-flat.css"), ".shell { color: yellow; }\n")
+        no_reload = run(env, "--no-shell-reload")
+        assert targets[0] in no_reload["changed_targets"]
+        assert no_reload["shell_reload"] == "skipped"
+        assert reload_count(log) == forced_reloads
     finally:
         temp.cleanup()
 
